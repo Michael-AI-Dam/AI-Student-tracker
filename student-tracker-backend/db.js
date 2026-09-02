@@ -1,46 +1,53 @@
-const Database = require('better-sqlite3');
-const db = new Database('tracker.db');
+const { Pool } = require('pg');
+require('dotenv').config();
 
-db.exec(`
-  CREATE TABLE IF NOT EXISTS students (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT NOT NULL,
-    class_name TEXT
-  );
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: { rejectUnauthorized: false },
+});
 
-  CREATE TABLE IF NOT EXISTS scores (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    student_id INTEGER,
-    type TEXT,
-    subject TEXT,
-    topic TEXT,
-    score REAL,
-    max_score REAL,
-    FOREIGN KEY (student_id) REFERENCES students(id)
-  );
+pool.on('error', (err) => {
+  console.error('Unexpected error on idle database client:', err.message);
+  // Don't crash the app — just log it. The pool will create a new connection on the next query.
+});
 
-  CREATE TABLE IF NOT EXISTS users (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT NOT NULL,
-    email TEXT UNIQUE NOT NULL,
-    password TEXT NOT NULL,
-    role TEXT NOT NULL,
-    student_id INTEGER,
-    FOREIGN KEY (student_id) REFERENCES students(id)
-  );
-`);
+async function initDb() {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS students (
+      id SERIAL PRIMARY KEY,
+      name TEXT NOT NULL,
+      class_name TEXT,
+      teacher_id INTEGER,
+      access_code TEXT
+    );
+  `);
 
-// Safe migrations: add new columns only if they don't already exist
-function columnExists(table, column) {
-  const cols = db.prepare(`PRAGMA table_info(${table})`).all();
-  return cols.some((c) => c.name === column);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS scores (
+      id SERIAL PRIMARY KEY,
+      student_id INTEGER REFERENCES students(id),
+      type TEXT,
+      subject TEXT,
+      topic TEXT,
+      score REAL,
+      max_score REAL
+    );
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS users (
+      id SERIAL PRIMARY KEY,
+      name TEXT NOT NULL,
+      email TEXT UNIQUE NOT NULL,
+      password TEXT NOT NULL,
+      role TEXT NOT NULL,
+      student_id INTEGER REFERENCES students(id)
+    );
+  `);
+
+  console.log('Database tables ready.');
 }
 
-if (!columnExists('students', 'teacher_id')) {
-  db.exec('ALTER TABLE students ADD COLUMN teacher_id INTEGER');
-}
-if (!columnExists('students', 'access_code')) {
-  db.exec('ALTER TABLE students ADD COLUMN access_code TEXT');
-}
+initDb().catch((err) => console.error('Error initializing database:', err));
 
-module.exports = db;
+module.exports = pool;

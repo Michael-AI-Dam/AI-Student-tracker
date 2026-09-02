@@ -17,7 +17,7 @@ function generateAccessCode() {
 }
 
 // Sign up
-app.post('/api/signup', (req, res) => {
+app.post('/api/signup', async (req, res) => {
   try {
     const { name, email, password, role, access_code } = req.body;
 
@@ -25,8 +25,8 @@ app.post('/api/signup', (req, res) => {
       return res.status(400).json({ error: 'Name, email, password, and role are required.' });
     }
 
-    const existing = db.prepare('SELECT * FROM users WHERE email = ?').get(email);
-    if (existing) {
+    const existing = await db.query('SELECT * FROM users WHERE email = $1', [email]);
+    if (existing.rows.length > 0) {
       return res.status(400).json({ error: 'An account with this email already exists.' });
     }
 
@@ -37,13 +37,15 @@ app.post('/api/signup', (req, res) => {
         return res.status(400).json({ error: 'Access code is required for student signup.' });
       }
 
-      const student = db.prepare('SELECT * FROM students WHERE access_code = ?').get(access_code.toUpperCase());
+      const studentResult = await db.query('SELECT * FROM students WHERE access_code = $1', [access_code.toUpperCase()]);
+      const student = studentResult.rows[0];
+
       if (!student) {
         return res.status(400).json({ error: 'Invalid access code. Ask your teacher for the correct code.' });
       }
 
-      const alreadyClaimed = db.prepare('SELECT * FROM users WHERE student_id = ?').get(student.id);
-      if (alreadyClaimed) {
+      const claimedResult = await db.query('SELECT * FROM users WHERE student_id = $1', [student.id]);
+      if (claimedResult.rows.length > 0) {
         return res.status(400).json({ error: 'This student record has already been claimed by another account.' });
       }
 
@@ -52,14 +54,13 @@ app.post('/api/signup', (req, res) => {
 
     const hashedPassword = bcrypt.hashSync(password, 10);
 
-    const stmt = db.prepare(`
-      INSERT INTO users (name, email, password, role, student_id)
-      VALUES (?, ?, ?, ?, ?)
-    `);
-    const result = stmt.run(name, email, hashedPassword, role, student_id);
+    const result = await db.query(
+      'INSERT INTO users (name, email, password, role, student_id) VALUES ($1, $2, $3, $4, $5) RETURNING id',
+      [name, email, hashedPassword, role, student_id]
+    );
 
     res.json({
-      id: result.lastInsertRowid,
+      id: result.rows[0].id,
       name,
       email,
       role,
@@ -72,11 +73,13 @@ app.post('/api/signup', (req, res) => {
 });
 
 // Log in
-app.post('/api/login', (req, res) => {
+app.post('/api/login', async (req, res) => {
   try {
     const { email, password } = req.body;
 
-    const user = db.prepare('SELECT * FROM users WHERE email = ?').get(email);
+    const result = await db.query('SELECT * FROM users WHERE email = $1', [email]);
+    const user = result.rows[0];
+
     if (!user) {
       return res.status(401).json({ error: 'Invalid email or password.' });
     }
@@ -100,57 +103,84 @@ app.post('/api/login', (req, res) => {
 });
 
 // Get students belonging to a specific teacher
-app.get('/api/students', (req, res) => {
-  const { teacher_id } = req.query;
+app.get('/api/students', async (req, res) => {
+  try {
+    const { teacher_id } = req.query;
 
-  if (teacher_id) {
-    const students = db.prepare('SELECT * FROM students WHERE teacher_id = ?').all(teacher_id);
-    return res.json(students);
+    if (teacher_id) {
+      const result = await db.query('SELECT * FROM students WHERE teacher_id = $1', [teacher_id]);
+      return res.json(result.rows);
+    }
+
+    const result = await db.query('SELECT * FROM students');
+    res.json(result.rows);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: err.message });
   }
-
-  const students = db.prepare('SELECT * FROM students').all();
-  res.json(students);
 });
 
-// Add a new student (owned by a teacher, with a generated access code)
-app.post('/api/students', (req, res) => {
-  const { name, class_name, teacher_id } = req.body;
+// Add a new student
+app.post('/api/students', async (req, res) => {
+  try {
+    const { name, class_name, teacher_id } = req.body;
 
-  if (!teacher_id) {
-    return res.status(400).json({ error: 'teacher_id is required to add a student.' });
+    if (!teacher_id) {
+      return res.status(400).json({ error: 'teacher_id is required to add a student.' });
+    }
+
+    const access_code = generateAccessCode();
+
+    const result = await db.query(
+      'INSERT INTO students (name, class_name, teacher_id, access_code) VALUES ($1, $2, $3, $4) RETURNING id',
+      [name, class_name, teacher_id, access_code]
+    );
+
+    res.json({ id: result.rows[0].id, name, class_name, teacher_id, access_code });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: err.message });
   }
-
-  const access_code = generateAccessCode();
-
-  const stmt = db.prepare('INSERT INTO students (name, class_name, teacher_id, access_code) VALUES (?, ?, ?, ?)');
-  const result = stmt.run(name, class_name, teacher_id, access_code);
-
-  res.json({ id: result.lastInsertRowid, name, class_name, teacher_id, access_code });
 });
 
 // Add a score entry
-app.post('/api/scores', (req, res) => {
-  const { student_id, type, subject, topic, score, max_score } = req.body;
-  const stmt = db.prepare(`
-    INSERT INTO scores (student_id, type, subject, topic, score, max_score)
-    VALUES (?, ?, ?, ?, ?, ?)
-  `);
-  const result = stmt.run(student_id, type, subject, topic, score, max_score);
-  res.json({ id: result.lastInsertRowid });
+app.post('/api/scores', async (req, res) => {
+  try {
+    const { student_id, type, subject, topic, score, max_score } = req.body;
+
+    const result = await db.query(
+      'INSERT INTO scores (student_id, type, subject, topic, score, max_score) VALUES ($1, $2, $3, $4, $5, $6) RETURNING id',
+      [student_id, type, subject, topic, score, max_score]
+    );
+
+    res.json({ id: result.rows[0].id });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // Get a student's full profile
-app.get('/api/students/:id/profile', (req, res) => {
-  const student = db.prepare('SELECT * FROM students WHERE id = ?').get(req.params.id);
-  const scores = db.prepare('SELECT * FROM scores WHERE student_id = ?').all(req.params.id);
-  res.json({ student, scores });
+app.get('/api/students/:id/profile', async (req, res) => {
+  try {
+    const studentResult = await db.query('SELECT * FROM students WHERE id = $1', [req.params.id]);
+    const scoresResult = await db.query('SELECT * FROM scores WHERE student_id = $1', [req.params.id]);
+
+    res.json({ student: studentResult.rows[0], scores: scoresResult.rows });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // AI recommendation
 app.get('/api/students/:id/recommendation', async (req, res) => {
   try {
-    const student = db.prepare('SELECT * FROM students WHERE id = ?').get(req.params.id);
-    const scores = db.prepare('SELECT * FROM scores WHERE student_id = ?').all(req.params.id);
+    const studentResult = await db.query('SELECT * FROM students WHERE id = $1', [req.params.id]);
+    const scoresResult = await db.query('SELECT * FROM scores WHERE student_id = $1', [req.params.id]);
+
+    const student = studentResult.rows[0];
+    const scores = scoresResult.rows;
 
     if (!student) {
       return res.status(404).json({ error: 'Student not found' });
@@ -188,5 +218,5 @@ Keep it under 150 words, honest but respectful in tone. Address the student dire
   }
 });
 
-const PORT = 3001;
-app.listen(PORT, () => console.log(`Backend running on http://localhost:${PORT}`));
+const PORT = process.env.PORT || 3001;
+app.listen(PORT, () => console.log(`Backend running on port ${PORT}`));
