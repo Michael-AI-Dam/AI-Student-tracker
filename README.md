@@ -1,4 +1,4 @@
-# EduSTEM AI
+# AI Students tracker
 
 An AI-powered personalized learning and assessment system for secondary school students and teachers.
 
@@ -7,7 +7,7 @@ An AI-powered personalized learning and assessment system for secondary school s
 
 ## Why this exists
 
-In secondary school, I was the student who guided my classmates in chemistry — yet I failed the subject myself. That one exam score didn't reflect my real understanding, and its weight followed me around. EduSTEM AI tracks a student's performance across **exams, quizzes, assignments, and class participation** — not exams alone — and uses AI to give honest, data-grounded feedback instead of a single number.
+In secondary school, I was the student who guided my classmates in chemistry — yet I failed the subject myself. That one exam score didn't reflect my real understanding, and its weight followed me around. AI Students tracker tracks a student's performance across **exams, quizzes, assignments, and class participation** — not exams alone — and uses AI to give honest, data-grounded feedback instead of a single number.
 
 ## Features
 
