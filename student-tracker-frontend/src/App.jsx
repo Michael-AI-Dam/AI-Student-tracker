@@ -37,7 +37,7 @@ function App() {
 
   const fetchStudents = (teacherId) => {
     setStudentsLoading(true)
-    fetch(`http://localhost:3001/api/students?teacher_id=${teacherId}`)
+    fetch(`https://ai-student-tracker-btiu.onrender.com/api/students?teacher_id=${teacherId}`)
       .then((res) => res.json())
       .then((data) => {
         setStudents(data)
@@ -57,7 +57,7 @@ function App() {
   }, [currentUser])
 
   const fetchProfile = (id) => {
-    fetch(`http://localhost:3001/api/students/${id}/profile`)
+    fetch(`https://ai-student-tracker-btiu.onrender.com/api/students/${id}/profile`)
       .then((res) => res.json())
       .then((data) => setProfile(data))
   }
@@ -65,7 +65,7 @@ function App() {
   const fetchRecommendation = (id) => {
     setLoadingRec(true)
     setRecommendation('')
-    fetch(`http://localhost:3001/api/students/${id}/recommendation`)
+    fetch(`https://ai-student-tracker-btiu.onrender.com/api/students/${id}/recommendation`)
       .then((res) => res.json())
       .then((data) => {
         setRecommendation(data.recommendation)
@@ -91,7 +91,7 @@ function App() {
     e.preventDefault()
     setAuthError('')
 
-    fetch('http://localhost:3001/api/login', {
+    fetch('https://ai-student-tracker-btiu.onrender.com/api/login', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email: authEmail, password: authPassword }),
@@ -108,7 +108,7 @@ function App() {
     e.preventDefault()
     setAuthError('')
 
-    fetch('http://localhost:3001/api/signup', {
+    fetch('https://ai-student-tracker-btiu.onrender.com/api/signup', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -142,7 +142,7 @@ function App() {
     e.preventDefault()
     setStudentMessage('')
 
-    fetch('http://localhost:3001/api/students', {
+    fetch('https://ai-student-tracker-btiu.onrender.com/api/students', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -165,7 +165,7 @@ function App() {
     e.preventDefault()
     setMessage('')
 
-    fetch('http://localhost:3001/api/scores', {
+    fetch('https://ai-student-tracker-btiu.onrender.com/api/scores', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
