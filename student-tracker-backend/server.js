@@ -3,41 +3,97 @@ const cors = require('cors');
 const bcrypt = require('bcryptjs');
 require('dotenv').config();
 
-const db = require('./db');
+const { getDb, getInitStatus } = require('./db');
 
 let groq = null;
 if (process.env.GROQ_API_KEY) {
   try {
     const Groq = require('groq-sdk');
     groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
-    console.log('Groq Key loaded: YES');
   } catch (err) {
     console.warn('Groq SDK initialization warning:', err.message);
   }
-} else {
-  console.log('Groq Key loaded: NO - undefined');
 }
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 
+// Normalize URLs: restore original requested path if Vercel rewrote it to /server.js
+app.use((req, res, next) => {
+  const match = req.headers['x-matched-path'] || req.headers['x-now-route-matches'] || req.headers['x-forwarded-uri'];
+  if (match) {
+    req.url = match;
+  } else if (req.url === '/server.js' || req.url.startsWith('/server.js')) {
+    req.url = req.url.replace(/^\/server\.js/, '') || '/';
+  } else if (req.url.startsWith('/api/index.js')) {
+    req.url = req.url.replace(/^\/api\/index\.js/, '') || '/';
+  }
+  next();
+});
+
+// Explicit fallback if Vercel internal router matches /server.js directly
+app.all('/server.js', (req, res, next) => {
+  const targetUrl = req.headers['x-matched-path'] || req.headers['x-forwarded-uri'] || '/';
+  req.url = targetUrl;
+  app._router.handle(req, res, next);
+});
+
 function generateAccessCode() {
   return Math.random().toString(36).substring(2, 8).toUpperCase();
 }
 
-// Health check / welcome endpoint
+// Middleware to ensure DB is initialized before executing query routes
+function requireDb(req, res, next) {
+  const db = getDb();
+  if (!db) {
+    const status = getInitStatus();
+    return res.status(500).json({
+      error: 'Database connection failed: ' + (status.error || 'Firebase not initialized.'),
+      status,
+    });
+  }
+  req.db = db;
+  next();
+}
+
+// Health check endpoint
 app.get('/', (req, res) => {
-  res.json({ message: 'EduSTEM AI Backend running with Firebase Firestore', status: 'healthy' });
+  res.json({
+    message: 'EduSTEM AI Backend running with Firebase Firestore',
+    status: 'healthy',
+    dbStatus: getInitStatus(),
+  });
 });
 
 app.get('/api/health', (req, res) => {
-  res.json({ status: 'ok', timestamp: new Date().toISOString() });
+  res.json({
+    status: 'ok',
+    timestamp: new Date().toISOString(),
+    dbStatus: getInitStatus(),
+  });
+});
+
+// Diagnostic debug endpoint
+app.get('/api/debug-env', (req, res) => {
+  res.json({
+    dbStatus: getInitStatus(),
+    hasServiceAccountKey: !!process.env.FIREBASE_SERVICE_ACCOUNT_KEY,
+    serviceAccountKeyLength: process.env.FIREBASE_SERVICE_ACCOUNT_KEY
+      ? process.env.FIREBASE_SERVICE_ACCOUNT_KEY.length
+      : 0,
+    hasProjectId: !!process.env.FIREBASE_PROJECT_ID,
+    hasClientEmail: !!process.env.FIREBASE_CLIENT_EMAIL,
+    hasPrivateKey: !!process.env.FIREBASE_PRIVATE_KEY,
+    privateKeyLength: process.env.FIREBASE_PRIVATE_KEY ? process.env.FIREBASE_PRIVATE_KEY.length : 0,
+    hasGroqKey: !!process.env.GROQ_API_KEY,
+  });
 });
 
 // Sign up
-app.post('/api/signup', async (req, res) => {
+app.post('/api/signup', requireDb, async (req, res) => {
   try {
+    const db = req.db;
     const { name, email, password, role, access_code } = req.body;
 
     if (!name || !email || !password || !role) {
@@ -46,7 +102,6 @@ app.post('/api/signup', async (req, res) => {
 
     const normalizedEmail = email.toLowerCase().trim();
 
-    // Check if email already exists
     const existing = await db.collection('users').where('email', '==', normalizedEmail).get();
     if (!existing.empty) {
       return res.status(400).json({ error: 'An account with this email already exists.' });
@@ -69,7 +124,6 @@ app.post('/api/signup', async (req, res) => {
       const studentDoc = studentQuery.docs[0];
       student_id = studentDoc.id;
 
-      // Check if student record is already claimed
       const claimed = await db.collection('users').where('student_id', '==', student_id).get();
       if (!claimed.empty) {
         return res.status(400).json({ error: 'This student record has already been claimed by another account.' });
@@ -101,8 +155,9 @@ app.post('/api/signup', async (req, res) => {
 });
 
 // Log in
-app.post('/api/login', async (req, res) => {
+app.post('/api/login', requireDb, async (req, res) => {
   try {
+    const db = req.db;
     const { email, password } = req.body;
 
     if (!email || !password) {
@@ -138,8 +193,9 @@ app.post('/api/login', async (req, res) => {
 });
 
 // Get students belonging to a specific teacher
-app.get('/api/students', async (req, res) => {
+app.get('/api/students', requireDb, async (req, res) => {
   try {
+    const db = req.db;
     const { teacher_id } = req.query;
 
     let queryRef = db.collection('students');
@@ -161,8 +217,9 @@ app.get('/api/students', async (req, res) => {
 });
 
 // Add a new student
-app.post('/api/students', async (req, res) => {
+app.post('/api/students', requireDb, async (req, res) => {
   try {
+    const db = req.db;
     const { name, class_name, teacher_id } = req.body;
 
     if (!teacher_id) {
@@ -197,8 +254,9 @@ app.post('/api/students', async (req, res) => {
 });
 
 // Add a score entry
-app.post('/api/scores', async (req, res) => {
+app.post('/api/scores', requireDb, async (req, res) => {
   try {
+    const db = req.db;
     const { student_id, type, subject, topic, score, max_score } = req.body;
 
     if (!student_id) {
@@ -211,7 +269,7 @@ app.post('/api/scores', async (req, res) => {
       subject: subject || 'General',
       topic: topic || '',
       score: Number(score),
-      max_score: Number(maxScore || max_score),
+      max_score: Number(max_score),
       createdAt: new Date().toISOString(),
     });
 
@@ -223,8 +281,9 @@ app.post('/api/scores', async (req, res) => {
 });
 
 // Get a student's full profile
-app.get('/api/students/:id/profile', async (req, res) => {
+app.get('/api/students/:id/profile', requireDb, async (req, res) => {
   try {
+    const db = req.db;
     const studentDoc = await db.collection('students').doc(req.params.id).get();
 
     if (!studentDoc.exists) {
@@ -251,12 +310,13 @@ app.get('/api/students/:id/profile', async (req, res) => {
 });
 
 // AI recommendation
-app.get('/api/students/:id/recommendation', async (req, res) => {
+app.get('/api/students/:id/recommendation', requireDb, async (req, res) => {
   try {
+    const db = req.db;
     const studentDoc = await db.collection('students').doc(req.params.id).get();
 
     if (!studentDoc.exists) {
-      return res.status(404).json({ error: 'Student not found.' });
+      return res.status(404).json({ error: 'Student not found' });
     }
 
     const scoresSnapshot = await db
@@ -275,7 +335,7 @@ app.get('/api/students/:id/recommendation', async (req, res) => {
 
     if (!groq) {
       return res.status(500).json({
-        error: 'GROQ_API_KEY is not configured on the server. Please add GROQ_API_KEY to environment variables.',
+        error: 'GROQ_API_KEY is not configured on the server.',
       });
     }
 
@@ -292,26 +352,4 @@ Based strictly on the data given, write a summary with:
 3. Specific weak areas based on the actual topics/scores shown
 4. 2-3 concrete, realistic next steps for studying THIS specific weak topic
 
-Keep it under 150 words, honest but respectful in tone. Address the student directly ("you").`;
-
-    const completion = await groq.chat.completions.create({
-      model: 'openai/gpt-oss-20b',
-      messages: [{ role: 'user', content: prompt }],
-      max_tokens: 500,
-    });
-
-    res.json({ recommendation: completion.choices[0].message.content });
-  } catch (err) {
-    console.error('Recommendation error:', err);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-const PORT = process.env.PORT || 3001;
-
-// Only listen directly if not running inside a Vercel Serverless Function
-if (!process.env.VERCEL) {
-  app.listen(PORT, () => console.log(`Backend running on port ${PORT}`));
-}
-
-module.exports = app;
+Keep it under 150 words, honest but respectful in tone. Address
