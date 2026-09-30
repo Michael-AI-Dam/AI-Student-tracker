@@ -4,18 +4,33 @@ const path = require('path');
 require('dotenv').config();
 
 let firestoreDb = null;
+let initStatus = {
+  method: 'none',
+  success: false,
+  error: null,
+  timestamp: new Date().toISOString(),
+};
 
-function getDb() {
-  if (firestoreDb) {
-    return firestoreDb;
+function formatPrivateKey(key) {
+  if (!key) return key;
+  let cleaned = key.trim();
+  if (
+    (cleaned.startsWith('"') && cleaned.endsWith('"')) ||
+    (cleaned.startsWith("'") && cleaned.endsWith("'"))
+  ) {
+    cleaned = cleaned.slice(1, -1);
   }
+  return cleaned.replace(/\\n/g, '\n');
+}
 
+function initFirebase() {
   if (admin.apps.length > 0) {
-    firestoreDb = admin.firestore();
-    return firestoreDb;
+    initStatus.method = 'existing_app';
+    initStatus.success = true;
+    return admin.firestore();
   }
 
-  // 1. Check for local serviceAccountKey.json file
+  // 1. Check local serviceAccountKey.json file
   const localKeyPath = path.join(__dirname, 'serviceAccountKey.json');
   if (fs.existsSync(localKeyPath)) {
     try {
@@ -23,75 +38,91 @@ function getDb() {
       admin.initializeApp({
         credential: admin.credential.cert(serviceAccount),
       });
-      console.log('Firebase initialized using local serviceAccountKey.json');
-      firestoreDb = admin.firestore();
-      return firestoreDb;
+      initStatus.method = 'serviceAccountKey.json';
+      initStatus.success = true;
+      return admin.firestore();
     } catch (err) {
-      console.error('Error reading serviceAccountKey.json:', err.message);
+      initStatus.error = 'serviceAccountKey.json error: ' + err.message;
     }
   }
 
-  // 2. Check for FIREBASE_SERVICE_ACCOUNT_KEY (full JSON string or Base64)
+  // 2. Check FIREBASE_SERVICE_ACCOUNT_KEY (Base64 or JSON string)
   if (process.env.FIREBASE_SERVICE_ACCOUNT_KEY) {
     try {
       let rawKey = process.env.FIREBASE_SERVICE_ACCOUNT_KEY.trim();
+      if (
+        (rawKey.startsWith('"') && rawKey.endsWith('"')) ||
+        (rawKey.startsWith("'") && rawKey.endsWith("'"))
+      ) {
+        rawKey = rawKey.slice(1, -1);
+      }
       if (!rawKey.startsWith('{')) {
-        rawKey = Buffer.from(rawKey, 'base64').toString('utf8');
+        try {
+          rawKey = Buffer.from(rawKey, 'base64').toString('utf8');
+        } catch (_) {}
       }
       const serviceAccount = JSON.parse(rawKey);
+      if (serviceAccount.private_key) {
+        serviceAccount.private_key = formatPrivateKey(serviceAccount.private_key);
+      }
       admin.initializeApp({
         credential: admin.credential.cert(serviceAccount),
       });
-      console.log('Firebase initialized using FIREBASE_SERVICE_ACCOUNT_KEY');
-      firestoreDb = admin.firestore();
-      return firestoreDb;
+      initStatus.method = 'FIREBASE_SERVICE_ACCOUNT_KEY';
+      initStatus.success = true;
+      return admin.firestore();
     } catch (err) {
-      console.error('Error parsing FIREBASE_SERVICE_ACCOUNT_KEY:', err.message);
+      initStatus.error = 'FIREBASE_SERVICE_ACCOUNT_KEY error: ' + err.message;
     }
   }
 
-  // 3. Check for individual environment variables
+  // 3. Check individual environment variables
   if (
     process.env.FIREBASE_PROJECT_ID &&
     process.env.FIREBASE_CLIENT_EMAIL &&
     process.env.FIREBASE_PRIVATE_KEY
   ) {
     try {
-      const privateKey = process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n');
+      const privateKey = formatPrivateKey(process.env.FIREBASE_PRIVATE_KEY);
       admin.initializeApp({
         credential: admin.credential.cert({
-          projectId: process.env.FIREBASE_PROJECT_ID,
-          clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
+          projectId: process.env.FIREBASE_PROJECT_ID.trim(),
+          clientEmail: process.env.FIREBASE_CLIENT_EMAIL.trim(),
           privateKey: privateKey,
         }),
       });
-      console.log('Firebase initialized using individual FIREBASE_* env variables');
-      firestoreDb = admin.firestore();
-      return firestoreDb;
+      initStatus.method = 'individual_env_vars';
+      initStatus.success = true;
+      return admin.firestore();
     } catch (err) {
-      console.error('Error initializing Firebase with individual env variables:', err.message);
+      initStatus.error = 'individual_env_vars error: ' + err.message;
     }
   }
 
-  // 4. Default Application Credentials (GCP environment)
-  try {
-    admin.initializeApp();
-    console.log('Firebase initialized with Google default credentials');
-    firestoreDb = admin.firestore();
-    return firestoreDb;
-  } catch (err) {
-    console.warn(
-      '⚠️ Firebase credentials not configured. Please set FIREBASE_PROJECT_ID, FIREBASE_CLIENT_EMAIL, and FIREBASE_PRIVATE_KEY, or provide serviceAccountKey.json'
-    );
-  }
+  // If no credentials succeeded, do not silently initialize with null credentials
+  initStatus.method = 'failed_no_credentials';
+  initStatus.success = false;
+  initStatus.error =
+    initStatus.error ||
+    'No valid Firebase credentials found in environment (FIREBASE_SERVICE_ACCOUNT_KEY or FIREBASE_PROJECT_ID/CLIENT_EMAIL/PRIVATE_KEY).';
 
-  try {
-    firestoreDb = admin.firestore();
-    return firestoreDb;
-  } catch (e) {
-    console.error('Firestore initialization failed:', e.message);
-    throw new Error('Firestore not initialized. Please configure Firebase credentials.');
-  }
+  return null;
 }
 
-module.exports = getDb();
+try {
+  firestoreDb = initFirebase();
+} catch (e) {
+  initStatus.error = e.message;
+}
+
+function getDb() {
+  if (!firestoreDb) {
+    firestoreDb = initFirebase();
+  }
+  return firestoreDb;
+}
+
+module.exports = {
+  getDb,
+  getInitStatus: () => initStatus,
+};
