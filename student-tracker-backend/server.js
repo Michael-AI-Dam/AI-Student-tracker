@@ -24,19 +24,8 @@ app.use((req, res, next) => {
   const match = req.headers['x-matched-path'] || req.headers['x-now-route-matches'] || req.headers['x-forwarded-uri'];
   if (match) {
     req.url = match;
-  } else if (req.url === '/server.js' || req.url.startsWith('/server.js')) {
-    req.url = req.url.replace(/^\/server\.js/, '') || '/';
-  } else if (req.url.startsWith('/api/index.js')) {
-    req.url = req.url.replace(/^\/api\/index\.js/, '') || '/';
   }
   next();
-});
-
-// Explicit fallback if Vercel internal router matches /server.js directly
-app.all('/server.js', (req, res, next) => {
-  const targetUrl = req.headers['x-matched-path'] || req.headers['x-forwarded-uri'] || '/';
-  req.url = targetUrl;
-  app._router.handle(req, res, next);
 });
 
 function generateAccessCode() {
@@ -352,4 +341,25 @@ Based strictly on the data given, write a summary with:
 3. Specific weak areas based on the actual topics/scores shown
 4. 2-3 concrete, realistic next steps for studying THIS specific weak topic
 
-Keep it under 150 words, honest but respectful in tone. Address
+Keep it under 150 words, honest but respectful in tone. Address the student directly ("you").`;
+
+    const completion = await groq.chat.completions.create({
+      model: 'openai/gpt-oss-20b',
+      messages: [{ role: 'user', content: prompt }],
+      max_tokens: 500,
+    });
+
+    res.json({ recommendation: completion.choices[0].message.content });
+  } catch (err) {
+    console.error('Recommendation error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+const PORT = process.env.PORT || 3001;
+
+if (!process.env.VERCEL) {
+  app.listen(PORT, () => console.log(`Backend running on port ${PORT}`));
+}
+
+module.exports = app;
