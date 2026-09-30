@@ -1,9 +1,10 @@
 {
   "name": "student-tracker-backend",
   "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
+  "description": "EduSTEM AI Backend with Firebase Firestore",
+  "main": "server.js",
   "scripts": {
+    "start": "node server.js",
     "dev": "nodemon server.js"
   },
   "keywords": [],
@@ -11,20 +12,14 @@
   "license": "ISC",
   "type": "commonjs",
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.120.0",
-    "@google/generative-ai": "^0.24.1",
     "bcryptjs": "^3.0.3",
-    "better-sqlite3": "^13.0.3",
     "cors": "^2.8.6",
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
-    "groq-sdk": "^1.6.0",
-    "pg": "^8.23.0"
+    "firebase-admin": "^12.7.0",
+    "groq-sdk": "^1.6.0"
   },
   "devDependencies": {
     "nodemon": "^3.1.14"
-  },
-  "allowScripts": {
-    "better-sqlite3@13.0.3": true
   }
 }

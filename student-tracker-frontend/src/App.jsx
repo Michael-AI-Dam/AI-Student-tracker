@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react'
 import './App.css'
 
+const API_URL = (import.meta.env.VITE_API_URL || 'https://ai-student-tracker-btiu.onrender.com').replace(/\/$/, '')
+
 function App() {
   const [students, setStudents] = useState([])
   const [studentsLoading, setStudentsLoading] = useState(false)
@@ -37,15 +39,19 @@ function App() {
 
   const fetchStudents = (teacherId) => {
     setStudentsLoading(true)
-    fetch(`https://ai-student-tracker-btiu.onrender.com/api/students?teacher_id=${teacherId}`)
+    fetch(`${API_URL}/api/students?teacher_id=${encodeURIComponent(teacherId)}`)
       .then((res) => res.json())
       .then((data) => {
-        setStudents(data)
-        setStudentsLoading(false)
-        if (data.length > 0) {
-          setStudentId((prev) => prev || data[0].id)
-          setProfileStudentId((prev) => prev || data[0].id)
+        if (Array.isArray(data)) {
+          setStudents(data)
+          if (data.length > 0) {
+            setStudentId((prev) => prev || data[0].id)
+            setProfileStudentId((prev) => prev || data[0].id)
+          }
+        } else {
+          setStudents([])
         }
+        setStudentsLoading(false)
       })
       .catch(() => setStudentsLoading(false))
   }
@@ -57,18 +63,19 @@ function App() {
   }, [currentUser])
 
   const fetchProfile = (id) => {
-    fetch(`https://ai-student-tracker-btiu.onrender.com/api/students/${id}/profile`)
+    fetch(`${API_URL}/api/students/${encodeURIComponent(id)}/profile`)
       .then((res) => res.json())
       .then((data) => setProfile(data))
+      .catch((err) => console.error('Fetch profile error:', err))
   }
 
   const fetchRecommendation = (id) => {
     setLoadingRec(true)
     setRecommendation('')
-    fetch(`https://ai-student-tracker-btiu.onrender.com/api/students/${id}/recommendation`)
+    fetch(`${API_URL}/api/students/${encodeURIComponent(id)}/recommendation`)
       .then((res) => res.json())
       .then((data) => {
-        setRecommendation(data.recommendation)
+        setRecommendation(data.recommendation || data.error || 'No recommendation received.')
         setLoadingRec(false)
       })
       .catch((err) => {
@@ -91,14 +98,14 @@ function App() {
     e.preventDefault()
     setAuthError('')
 
-    fetch('https://ai-student-tracker-btiu.onrender.com/api/login', {
+    fetch(`${API_URL}/api/login`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email: authEmail, password: authPassword }),
     })
       .then(async (res) => {
         const data = await res.json()
-        if (!res.ok) throw new Error(data.error)
+        if (!res.ok) throw new Error(data.error || 'Login failed')
         setCurrentUser(data)
       })
       .catch((err) => setAuthError(err.message))
@@ -108,7 +115,7 @@ function App() {
     e.preventDefault()
     setAuthError('')
 
-    fetch('https://ai-student-tracker-btiu.onrender.com/api/signup', {
+    fetch(`${API_URL}/api/signup`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -121,7 +128,7 @@ function App() {
     })
       .then(async (res) => {
         const data = await res.json()
-        if (!res.ok) throw new Error(data.error)
+        if (!res.ok) throw new Error(data.error || 'Signup failed')
         setCurrentUser(data)
       })
       .catch((err) => setAuthError(err.message))
@@ -142,7 +149,7 @@ function App() {
     e.preventDefault()
     setStudentMessage('')
 
-    fetch('https://ai-student-tracker-btiu.onrender.com/api/students', {
+    fetch(`${API_URL}/api/students`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -151,8 +158,9 @@ function App() {
         teacher_id: currentUser.id,
       }),
     })
-      .then((res) => res.json())
-      .then((data) => {
+      .then(async (res) => {
+        const data = await res.json()
+        if (!res.ok) throw new Error(data.error || 'Failed to add student')
         setStudentMessage(`Student added! Share this access code with them: ${data.access_code}`)
         setNewStudentName('')
         setNewStudentClass('')
@@ -165,11 +173,11 @@ function App() {
     e.preventDefault()
     setMessage('')
 
-    fetch('https://ai-student-tracker-btiu.onrender.com/api/scores', {
+    fetch(`${API_URL}/api/scores`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        student_id: Number(studentId),
+        student_id: studentId,
         type,
         subject,
         topic,
@@ -177,13 +185,14 @@ function App() {
         max_score: Number(maxScore),
       }),
     })
-      .then((res) => res.json())
-      .then(() => {
+      .then(async (res) => {
+        const data = await res.json()
+        if (!res.ok) throw new Error(data.error || 'Failed to add score')
         setMessage('Score added successfully!')
         setTopic('')
         setScore('')
         setMaxScore('')
-        if (Number(studentId) === Number(profileStudentId)) {
+        if (String(studentId) === String(profileStudentId)) {
           fetchProfile(profileStudentId)
         }
       })
@@ -191,6 +200,7 @@ function App() {
   }
 
   const calculateComposite = (scores) => {
+    if (!scores || !Array.isArray(scores)) return null
     const weights = { exam: 0.5, quiz: 0.2, assignment: 0.2, participation: 0.1 }
     const byType = {}
 
@@ -407,9 +417,9 @@ function App() {
 
       {profile && (
         <div style={{ marginTop: '16px' }}>
-          <h3>{profile.student.name} — {profile.student.class_name}</h3>
+          <h3>{profile.student?.name} {profile.student?.class_name ? `— ${profile.student.class_name}` : ''}</h3>
 
-          {profile.scores.length === 0 ? (
+          {!profile.scores || profile.scores.length === 0 ? (
             <p>No scores recorded yet.</p>
           ) : (
             <>
