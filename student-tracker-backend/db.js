@@ -13,14 +13,15 @@ let initStatus = {
 
 function formatPrivateKey(key) {
   if (!key) return key;
-  let cleaned = key.trim();
+  let cleaned = String(key).trim();
   if (
     (cleaned.startsWith('"') && cleaned.endsWith('"')) ||
     (cleaned.startsWith("'") && cleaned.endsWith("'"))
   ) {
     cleaned = cleaned.slice(1, -1);
   }
-  return cleaned.replace(/\\n/g, '\n');
+  // Strip Windows \r and replace literal \n with real newlines
+  return cleaned.replace(/\r/g, '').replace(/\\n/g, '\n');
 }
 
 function initFirebase() {
@@ -35,12 +36,18 @@ function initFirebase() {
   if (fs.existsSync(localKeyPath)) {
     try {
       const serviceAccount = JSON.parse(fs.readFileSync(localKeyPath, 'utf8'));
+      if (serviceAccount.private_key) {
+        serviceAccount.private_key = formatPrivateKey(serviceAccount.private_key);
+      }
       admin.initializeApp({
         credential: admin.credential.cert(serviceAccount),
+        projectId: serviceAccount.project_id || 'ai-student-tracker-stem',
       });
       initStatus.method = 'serviceAccountKey.json';
       initStatus.success = true;
-      return admin.firestore();
+      const db = admin.firestore();
+      db.settings({ ignoreUndefinedProperties: true });
+      return db;
     } catch (err) {
       initStatus.error = 'serviceAccountKey.json error: ' + err.message;
     }
@@ -67,10 +74,13 @@ function initFirebase() {
       }
       admin.initializeApp({
         credential: admin.credential.cert(serviceAccount),
+        projectId: serviceAccount.project_id || 'ai-student-tracker-stem',
       });
       initStatus.method = 'FIREBASE_SERVICE_ACCOUNT_KEY';
       initStatus.success = true;
-      return admin.firestore();
+      const db = admin.firestore();
+      db.settings({ ignoreUndefinedProperties: true });
+      return db;
     } catch (err) {
       initStatus.error = 'FIREBASE_SERVICE_ACCOUNT_KEY error: ' + err.message;
     }
@@ -90,21 +100,23 @@ function initFirebase() {
           clientEmail: process.env.FIREBASE_CLIENT_EMAIL.trim(),
           privateKey: privateKey,
         }),
+        projectId: process.env.FIREBASE_PROJECT_ID.trim(),
       });
       initStatus.method = 'individual_env_vars';
       initStatus.success = true;
-      return admin.firestore();
+      const db = admin.firestore();
+      db.settings({ ignoreUndefinedProperties: true });
+      return db;
     } catch (err) {
       initStatus.error = 'individual_env_vars error: ' + err.message;
     }
   }
 
-  // If no credentials succeeded, do not silently initialize with null credentials
   initStatus.method = 'failed_no_credentials';
   initStatus.success = false;
   initStatus.error =
     initStatus.error ||
-    'No valid Firebase credentials found in environment (FIREBASE_SERVICE_ACCOUNT_KEY or FIREBASE_PROJECT_ID/CLIENT_EMAIL/PRIVATE_KEY).';
+    'No valid Firebase credentials found in environment.';
 
   return null;
 }
