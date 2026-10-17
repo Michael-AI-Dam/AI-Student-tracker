@@ -16,7 +16,7 @@ function App() {
   const [authError, setAuthError] = useState('')
   const [authSuccess, setAuthSuccess] = useState('')
 
-  // Active Tab
+  // Active Navigation Tab
   const [activeTab, setActiveTab] = useState('analytics')
 
   // Teacher State
@@ -25,7 +25,17 @@ function App() {
   const [teacherAnalytics, setTeacherAnalytics] = useState(null)
   const [loadingAnalytics, setLoadingAnalytics] = useState(false)
 
-  // Forms State
+  // Teacher Interactive Modals State
+  // 'class_size' | 'class_average' | 'total_assessments' | 'needing_support' | 'profile_settings' | null
+  const [teacherModal, setTeacherModal] = useState(null)
+  const [editTeacherName, setEditTeacherName] = useState('')
+  const [editTeacherEmail, setEditTeacherEmail] = useState('')
+  const [editTeacherPassword, setEditTeacherPassword] = useState('')
+  const [editTeacherMessage, setEditTeacherMessage] = useState('')
+  const [editTeacherError, setEditTeacherError] = useState('')
+  const [updatingProfile, setUpdatingProfile] = useState(false)
+
+  // Teacher Forms State
   const [newStudentName, setNewStudentName] = useState('')
   const [newStudentClass, setNewStudentClass] = useState('')
   const [studentMessage, setStudentMessage] = useState('')
@@ -38,15 +48,20 @@ function App() {
   const [maxScoreVal, setMaxScoreVal] = useState('')
   const [scoreMessage, setScoreMessage] = useState('')
 
-  // Individual Student Profile View
+  // Individual Student Profile View (Teacher)
   const [profileStudentId, setProfileStudentId] = useState('')
   const [profile, setProfile] = useState(null)
-  const [recommendation, setRecommendation] = useState('')
-  const [loadingRec, setLoadingRec] = useState(false)
 
   // Student Dashboard State
   const [studentAnalytics, setStudentAnalytics] = useState(null)
   const [loadingStudentAnalytics, setLoadingStudentAnalytics] = useState(false)
+  const [expandedStrengthSubjects, setExpandedStrengthSubjects] = useState({})
+  const [expandedWeakSubjects, setExpandedWeakSubjects] = useState({})
+
+  // Student Assessment History & AI Generator State
+  const [selectedSubjectHistory, setSelectedSubjectHistory] = useState('All')
+  const [historyRecommendation, setHistoryRecommendation] = useState('')
+  const [loadingHistoryRec, setLoadingHistoryRec] = useState(false)
 
   // Learn with AI Materials State
   const [selectedTopicForStudy, setSelectedTopicForStudy] = useState('')
@@ -61,10 +76,26 @@ function App() {
   const [userQuizAnswers, setUserQuizAnswers] = useState({})
   const [revealedHints, setRevealedHints] = useState({})
 
-  // Helper to format student label: Name (Class) — no long hyphens
+  // Helper: Name (Class) format — no long hyphens
   const formatStudentLabel = (name, className) => {
     if (!name) return ''
     return className ? `${name} (${className})` : name
+  }
+
+  // Helper: Sorting subjects so English is ALWAYS #1, Mathematics is ALWAYS #2, then others
+  const sortSubjectsWithEnglishAndMathFirst = (subjectsList) => {
+    if (!Array.isArray(subjectsList)) return []
+    return [...subjectsList].sort((a, b) => {
+      const nameA = (a.subject || a || '').toString().toLowerCase()
+      const nameB = (b.subject || b || '').toString().toLowerCase()
+      const isEnglish = (s) => s.includes('english')
+      const isMath = (s) => s.includes('math')
+      if (isEnglish(nameA) && !isEnglish(nameB)) return -1
+      if (!isEnglish(nameA) && isEnglish(nameB)) return 1
+      if (isMath(nameA) && !isMath(nameB)) return isEnglish(nameB) ? 1 : -1
+      if (!isMath(nameA) && isMath(nameB)) return isEnglish(nameA) ? -1 : 1
+      return nameA.localeCompare(nameB)
+    })
   }
 
   // Clicking Logo takes user back to their main dashboard
@@ -131,18 +162,20 @@ function App() {
       .catch((err) => console.error('Fetch profile error:', err))
   }
 
-  const fetchRecommendation = (id) => {
-    setLoadingRec(true)
-    setRecommendation('')
-    fetch(`${API_URL}/api/students/${encodeURIComponent(id)}/recommendation`)
+  // Fetch Subject-Specific AI Recommendation for Student
+  const fetchStudentSubjectRecommendation = (studId, targetSubject) => {
+    setLoadingHistoryRec(true)
+    setHistoryRecommendation('')
+    const queryParam = targetSubject && targetSubject !== 'All' ? `?subject=${encodeURIComponent(targetSubject)}` : ''
+    fetch(`${API_URL}/api/students/${encodeURIComponent(studId)}/recommendation${queryParam}`)
       .then((res) => res.json())
       .then((data) => {
-        setRecommendation(data.recommendation || data.error || 'No recommendation received.')
-        setLoadingRec(false)
+        setHistoryRecommendation(data.recommendation || data.error || 'No recommendation received.')
+        setLoadingHistoryRec(false)
       })
       .catch((err) => {
-        setRecommendation('Error: ' + err.message)
-        setLoadingRec(false)
+        setHistoryRecommendation('Error: ' + err.message)
+        setLoadingHistoryRec(false)
       })
   }
 
@@ -199,6 +232,8 @@ function App() {
     if (currentUser?.role === 'teacher') {
       fetchStudents(currentUser.id)
       fetchTeacherAnalytics(currentUser.id)
+      setEditTeacherName(currentUser.name || '')
+      setEditTeacherEmail(currentUser.email || '')
     } else if (currentUser?.role === 'student' && currentUser.student_id) {
       setProfileStudentId(currentUser.student_id)
       fetchProfile(currentUser.student_id)
@@ -287,6 +322,40 @@ function App() {
       .catch((err) => setAuthError(err.message))
   }
 
+  const handleUpdateTeacherProfile = (e) => {
+    e.preventDefault()
+    setEditTeacherError('')
+    setEditTeacherMessage('')
+    setUpdatingProfile(true)
+
+    fetch(`${API_URL}/api/teachers/update-profile`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        teacherId: currentUser.id,
+        name: editTeacherName,
+        email: editTeacherEmail,
+        newPassword: editTeacherPassword || undefined,
+      }),
+    })
+      .then(async (res) => {
+        const data = await res.json()
+        setUpdatingProfile(false)
+        if (!res.ok) throw new Error(data.error || 'Failed to update profile')
+        setCurrentUser((prev) => ({
+          ...prev,
+          name: data.name,
+          email: data.email,
+        }))
+        setEditTeacherMessage('Profile updated successfully!')
+        setEditTeacherPassword('')
+      })
+      .catch((err) => {
+        setUpdatingProfile(false)
+        setEditTeacherError(err.message)
+      })
+  }
+
   const handleLogout = () => {
     setCurrentUser(null)
     setAuthEmail('')
@@ -298,11 +367,12 @@ function App() {
     setAuthSuccess('')
     setStudents([])
     setProfile(null)
-    setRecommendation('')
     setTeacherAnalytics(null)
     setStudentAnalytics(null)
     setStudyMaterials(null)
     setQuizData(null)
+    setTeacherModal(null)
+    setHistoryRecommendation('')
   }
 
   const handleAddStudent = (e) => {
@@ -320,7 +390,8 @@ function App() {
       .then(async (res) => {
         const data = await res.json()
         if (!res.ok) throw new Error(data.error || 'Failed to add student')
-        setStudentMessage(`Student registered! Access Code: ${data.access_code}`)
+        const note = data.message ? ` (${data.message})` : ''
+        setStudentMessage(`Student registered! Access Code: ${data.access_code}${note}`)
         setNewStudentName('')
         setNewStudentClass('')
         fetchStudents(currentUser.id)
@@ -600,6 +671,18 @@ function App() {
     )
   }
 
+  // Extract distinct registered subjects for student's assessment history tabs
+  const studentRegisteredSubjects = profile?.scores
+    ? ['All', ...new Set(profile.scores.map((s) => s.subject).filter(Boolean))]
+    : ['All']
+
+  // Filtered scores in student assessment history tab
+  const filteredHistoryScores = profile?.scores
+    ? selectedSubjectHistory === 'All'
+      ? profile.scores
+      : profile.scores.filter((s) => (s.subject || '').toLowerCase() === selectedSubjectHistory.toLowerCase())
+    : []
+
   // --- Main Application View ---
   return (
     <div className="tracker-container">
@@ -627,6 +710,18 @@ function App() {
           <span style={{ fontWeight: '600', fontSize: '14px', color: '#1e293b' }}>
             {currentUser.name}
           </span>
+
+          {currentUser.role === 'teacher' && (
+            <button
+              onClick={() => { setTeacherModal('profile_settings'); setEditTeacherError(''); setEditTeacherMessage('') }}
+              className="btn-secondary"
+              style={{ padding: '7px 12px', fontSize: '12px' }}
+              title="Edit Profile & Password"
+            >
+              ⚙️ Settings
+            </button>
+          )}
+
           <button onClick={handleLogout} className="btn-logout">
             Log Out
           </button>
@@ -659,7 +754,7 @@ function App() {
               onClick={() => setActiveTab('profiles')}
               className={`tab-btn ${activeTab === 'profiles' ? 'active' : ''}`}
             >
-              👤 Student Profiles & AI
+              👤 Student Profiles & Performance
             </button>
           </>
         ) : (
@@ -701,26 +796,49 @@ function App() {
             <p style={{ textAlign: 'center', padding: '40px', color: '#64748b' }}>Analyzing classroom performance data...</p>
           ) : teacherAnalytics ? (
             <>
-              {/* Metrics Grid */}
+              {/* Responsive Clickable Metrics Grid */}
               <div className="metrics-grid">
-                <div className="metric-card">
+                {/* 1. Class Size */}
+                <div
+                  className="metric-card clickable"
+                  onClick={() => setTeacherModal('class_size')}
+                  title="Click to view all registered students"
+                >
                   <span className="metric-label">Class Size</span>
                   <span className="metric-val">{teacherAnalytics.totalStudents}</span>
                   <span className="metric-sub">Registered Students</span>
                 </div>
-                <div className="metric-card">
+
+                {/* 2. Class Average */}
+                <div
+                  className="metric-card clickable"
+                  onClick={() => setTeacherModal('class_average')}
+                  title="Click to view individual student composite breakdown"
+                >
                   <span className="metric-label">Class Average</span>
                   <span className="metric-val" style={{ color: teacherAnalytics.classAverage >= 70 ? '#059669' : teacherAnalytics.classAverage >= 50 ? '#d97706' : '#dc2626' }}>
                     {teacherAnalytics.classAverage}%
                   </span>
                   <span className="metric-sub">Weighted Composite</span>
                 </div>
-                <div className="metric-card">
+
+                {/* 3. Total Assessments */}
+                <div
+                  className="metric-card clickable"
+                  onClick={() => setTeacherModal('total_assessments')}
+                  title="Click to view assessments recorded per student"
+                >
                   <span className="metric-label">Total Assessments</span>
                   <span className="metric-val">{teacherAnalytics.totalScores}</span>
                   <span className="metric-sub">Exams, Quizzes & Assignments</span>
                 </div>
-                <div className="metric-card">
+
+                {/* 4. Needing Support */}
+                <div
+                  className="metric-card clickable"
+                  onClick={() => setTeacherModal('needing_support')}
+                  title="Click to view students needing academic intervention"
+                >
                   <span className="metric-label">Needing Support</span>
                   <span className="metric-val" style={{ color: teacherAnalytics.atRiskStudents.length > 0 ? '#dc2626' : '#059669' }}>
                     {teacherAnalytics.atRiskStudents.length}
@@ -830,11 +948,11 @@ function App() {
                 </div>
               )}
 
-              {/* Class-Wide Topic Difficulty Matrix */}
+              {/* Class-Wide Topic Difficulty Matrix Broken Down by Assessment Category */}
               <div className="data-card">
                 <h3>Class-Wide Topic Difficulty Matrix</h3>
                 <p className="data-card-subtitle">
-                  Ranked by difficulty. Topics at the top are where students struggled the most across all tests.
+                  Ranked by difficulty. Submissions broken down across Exam, Quiz, Assignment, and Participation.
                 </p>
                 {teacherAnalytics.topicPerformance.length === 0 ? (
                   <p style={{ color: '#64748b' }}>No topic assessments recorded yet.</p>
@@ -844,7 +962,10 @@ function App() {
                       <tr>
                         <th>Topic</th>
                         <th>Subject</th>
-                        <th>Submissions</th>
+                        <th style={{ textAlign: 'center' }}>Exam</th>
+                        <th style={{ textAlign: 'center' }}>Quiz</th>
+                        <th style={{ textAlign: 'center' }}>Assignment</th>
+                        <th style={{ textAlign: 'center' }}>Participation</th>
                         <th>Class Average</th>
                         <th>Status</th>
                       </tr>
@@ -854,7 +975,34 @@ function App() {
                         <tr key={idx}>
                           <td><strong>{t.topic}</strong></td>
                           <td>{t.subject}</td>
-                          <td>{t.count}</td>
+                          <td style={{ textAlign: 'center' }}>
+                            {t.byCategory?.exam > 0 ? (
+                              <span style={{ fontWeight: '600', color: '#1e40af' }}>{t.byCategory.exam}</span>
+                            ) : (
+                              <span style={{ color: '#94a3b8' }}>—</span>
+                            )}
+                          </td>
+                          <td style={{ textAlign: 'center' }}>
+                            {t.byCategory?.quiz > 0 ? (
+                              <span style={{ fontWeight: '600', color: '#1e40af' }}>{t.byCategory.quiz}</span>
+                            ) : (
+                              <span style={{ color: '#94a3b8' }}>—</span>
+                            )}
+                          </td>
+                          <td style={{ textAlign: 'center' }}>
+                            {t.byCategory?.assignment > 0 ? (
+                              <span style={{ fontWeight: '600', color: '#1e40af' }}>{t.byCategory.assignment}</span>
+                            ) : (
+                              <span style={{ color: '#94a3b8' }}>—</span>
+                            )}
+                          </td>
+                          <td style={{ textAlign: 'center' }}>
+                            {t.byCategory?.participation > 0 ? (
+                              <span style={{ fontWeight: '600', color: '#1e40af' }}>{t.byCategory.participation}</span>
+                            ) : (
+                              <span style={{ color: '#94a3b8' }}>—</span>
+                            )}
+                          </td>
                           <td>
                             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                               <span style={{ minWidth: '40px', fontWeight: '600' }}>{t.avgPct}%</span>
@@ -895,7 +1043,7 @@ function App() {
           <div className="data-card">
             <h3>Add New Student to Classroom</h3>
             <p className="data-card-subtitle">
-              Register a student to generate a unique access code they can use to view their private portal.
+              Register a student or link an existing student from the school database. Existing students keep their access code.
             </p>
             <form onSubmit={handleAddStudent} style={{ border: 'none', padding: 0, boxShadow: 'none' }}>
               <div className="form-grid">
@@ -966,7 +1114,7 @@ function App() {
                           className="btn-secondary"
                           style={{ padding: '6px 12px', fontSize: '12px' }}
                         >
-                          View Profile & AI →
+                          View Profile & Performance →
                         </button>
                       </td>
                     </tr>
@@ -1054,7 +1202,7 @@ function App() {
       )}
 
       {/* ============================================================== */}
-      {/* TEACHER TAB 4: INDIVIDUAL PROFILES & RECOMMENDATIONS           */}
+      {/* TEACHER TAB 4: STUDENT PROFILES & PERFORMANCE (NO AI BTN)      */}
       {/* ============================================================== */}
       {currentUser.role === 'teacher' && activeTab === 'profiles' && (
         <div>
@@ -1095,60 +1243,35 @@ function App() {
               {!profile.scores || profile.scores.length === 0 ? (
                 <p style={{ marginTop: '20px', color: '#64748b' }}>No assessment scores on record for this student yet.</p>
               ) : (
-                <>
-                  <table style={{ marginTop: '20px' }}>
-                    <thead>
-                      <tr>
-                        <th>Type</th>
-                        <th>Subject</th>
-                        <th>Topic</th>
-                        <th>Score</th>
-                        <th>Percentage</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {profile.scores.map((s) => {
-                        const pct = s.max_score > 0 ? ((s.score / s.max_score) * 100).toFixed(1) : 0
-                        return (
-                          <tr key={s.id}>
-                            <td><span style={{ textTransform: 'capitalize' }}>{s.type}</span></td>
-                            <td>{s.subject}</td>
-                            <td><strong>{s.topic}</strong></td>
-                            <td>{s.score} / {s.max_score}</td>
-                            <td>
-                              <span style={{ fontWeight: 'bold', color: pct >= 70 ? '#059669' : pct >= 50 ? '#d97706' : '#dc2626' }}>
-                                {pct}%
-                              </span>
-                            </td>
-                          </tr>
-                        )
-                      })}
-                    </tbody>
-                  </table>
-
-                  {/* AI Recommendation Generator */}
-                  <div style={{ marginTop: '26px', padding: '20px', background: '#f8fafc', borderRadius: '12px', border: '1px solid #e2e8f0' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
-                      <div>
-                        <h4 style={{ margin: '0 0 4px', color: '#1e40af', fontSize: '16px' }}>AI Diagnostic Learning Recommendation</h4>
-                        <p style={{ margin: 0, fontSize: '13px', color: '#64748b' }}>
-                          Generates honest, data-grounded assessment based strictly on this student's recorded scores.
-                        </p>
-                      </div>
-                      <button onClick={() => fetchRecommendation(profileStudentId)} className="btn-primary">
-                        {loadingRec ? 'Analyzing Performance...' : '⚡ Generate AI Assessment'}
-                      </button>
-                    </div>
-
-                    {loadingRec && <p style={{ marginTop: '14px', color: '#64748b' }}>Analyzing performance records...</p>}
-
-                    {recommendation && (
-                      <div style={{ marginTop: '16px', padding: '16px 20px', background: 'white', border: '1px solid #cbd5e1', borderRadius: '10px', lineHeight: 1.6, whiteSpace: 'pre-wrap', fontSize: '14px', color: '#1e293b' }}>
-                        {recommendation}
-                      </div>
-                    )}
-                  </div>
-                </>
+                <table style={{ marginTop: '20px' }}>
+                  <thead>
+                    <tr>
+                      <th>Type</th>
+                      <th>Subject</th>
+                      <th>Topic</th>
+                      <th>Score</th>
+                      <th>Percentage</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {profile.scores.map((s) => {
+                      const pct = s.max_score > 0 ? ((s.score / s.max_score) * 100).toFixed(1) : 0
+                      return (
+                        <tr key={s.id}>
+                          <td><span style={{ textTransform: 'capitalize' }}>{s.type}</span></td>
+                          <td>{s.subject}</td>
+                          <td><strong>{s.topic}</strong></td>
+                          <td>{s.score} / {s.max_score}</td>
+                          <td>
+                            <span style={{ fontWeight: 'bold', color: pct >= 70 ? '#059669' : pct >= 50 ? '#d97706' : '#dc2626' }}>
+                              {pct}%
+                            </span>
+                          </td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
               )}
             </div>
           )}
@@ -1173,93 +1296,137 @@ function App() {
                   </span>
                   <span className="metric-sub">Weighted Composite Score</span>
                 </div>
-                <div className="metric-card">
+                <div
+                  className="metric-card clickable"
+                  onClick={() => setActiveTab('my_scores')}
+                  title="Click to view all score records"
+                >
                   <span className="metric-label">Completed Assessments</span>
                   <span className="metric-val">{studentAnalytics.totalScores}</span>
-                  <span className="metric-sub">Recorded by your teacher</span>
+                  <span className="metric-sub">Recorded by teachers</span>
                 </div>
                 <div className="metric-card">
                   <span className="metric-label">Mastered Strengths</span>
-                  <span className="metric-val" style={{ color: '#059669' }}>{studentAnalytics.strengths.length}</span>
-                  <span className="metric-sub">Topics ≥ 75% score</span>
+                  <span className="metric-val" style={{ color: '#059669' }}>
+                    {studentAnalytics.subjectStrengths?.length || 0}
+                  </span>
+                  <span className="metric-sub">Subjects ≥ 75% score</span>
                 </div>
                 <div className="metric-card">
                   <span className="metric-label">Focus Areas</span>
-                  <span className="metric-val" style={{ color: studentAnalytics.weaknesses.length > 0 ? '#dc2626' : '#059669' }}>
-                    {studentAnalytics.weaknesses.length}
+                  <span className="metric-val" style={{ color: (studentAnalytics.subjectWeaknesses?.length || 0) > 0 ? '#dc2626' : '#059669' }}>
+                    {studentAnalytics.subjectWeaknesses?.length || 0}
                   </span>
-                  <span className="metric-sub">Topics to reinforce</span>
+                  <span className="metric-sub">Subjects to reinforce</span>
                 </div>
               </div>
 
-              {/* Strengths & Growth Areas */}
+              {/* Strengths & Growth Areas Grouped by Subject */}
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '20px', marginBottom: '24px' }}>
-                {/* Strengths Card */}
+                {/* Strengths Card Grouped by Subject */}
                 <div className="data-card">
                   <h3 style={{ color: '#065f46', display: 'flex', alignItems: 'center', gap: '8px' }}>
                     🌟 My Demonstrated Strengths
                   </h3>
-                  <p className="data-card-subtitle">Topics where you have achieved proficient or advanced understanding.</p>
-                  {studentAnalytics.strengths.length === 0 ? (
-                    <p style={{ color: '#64748b', fontSize: '14px' }}>Keep practicing assessments to build topic masteries!</p>
+                  <p className="data-card-subtitle">Subjects where you achieved mastery. Click a subject to view topic breakdown.</p>
+                  {(!studentAnalytics.subjectStrengths || studentAnalytics.subjectStrengths.length === 0) ? (
+                    <p style={{ color: '#64748b', fontSize: '14px' }}>Keep practicing assessments to build subject masteries!</p>
                   ) : (
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                      {studentAnalytics.strengths.map((t, i) => (
-                        <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 14px', background: '#ecfdf5', borderRadius: '8px', border: '1px solid #a7f3d0' }}>
-                          <span>
-                            <strong>{t.topic}</strong>
-                            {t.subject && t.subject !== 'STEM' && t.subject !== 'General' && (
-                              <small style={{ color: '#059669', marginLeft: '6px' }}>({t.subject})</small>
+                    <div>
+                      {studentAnalytics.subjectStrengths.map((sub, i) => {
+                        const isExpanded = !!expandedStrengthSubjects[sub.subject]
+                        return (
+                          <div key={i} className="subject-accordion-card">
+                            <div
+                              className="subject-accordion-header"
+                              onClick={() => setExpandedStrengthSubjects((prev) => ({ ...prev, [sub.subject]: !prev[sub.subject] }))}
+                            >
+                              <div>
+                                <strong style={{ fontSize: '15px', color: '#065f46' }}>{sub.subject}</strong>
+                                <span style={{ fontSize: '12px', color: '#64748b', marginLeft: '8px' }}>
+                                  ({sub.topics?.length || 0} topics {isExpanded ? '▲' : '▼'})
+                                </span>
+                              </div>
+                              <span style={{ fontWeight: 'bold', color: '#059669', fontSize: '16px' }}>{sub.avgPct}%</span>
+                            </div>
+
+                            {isExpanded && (
+                              <div className="subject-accordion-body">
+                                {sub.topics && sub.topics.map((tp, idx) => (
+                                  <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 0', borderBottom: idx < sub.topics.length - 1 ? '1px solid #e2e8f0' : 'none', fontSize: '13px' }}>
+                                    <span>{tp.topic}</span>
+                                    <span style={{ fontWeight: '600', color: tp.avgPct >= 70 ? '#059669' : '#d97706' }}>{tp.avgPct}%</span>
+                                  </div>
+                                ))}
+                              </div>
                             )}
-                          </span>
-                          <span style={{ fontWeight: 'bold', color: '#059669' }}>{t.avgPct}%</span>
-                        </div>
-                      ))}
+                          </div>
+                        )
+                      })}
                     </div>
                   )}
                 </div>
 
-                {/* Focus Weaknesses Card */}
+                {/* Focus Weaknesses Card Grouped by Subject */}
                 <div className="data-card">
                   <h3 style={{ color: '#b91c1c', display: 'flex', alignItems: 'center', gap: '8px' }}>
                     🎯 Focus & Reinforcement Areas
                   </h3>
-                  <p className="data-card-subtitle">Topics where extra study and practice will boost your overall mastery.</p>
-                  {studentAnalytics.weaknesses.length === 0 ? (
-                    <p style={{ color: '#059669', fontSize: '14px' }}>Great job! You have no critical weak topics.</p>
+                  <p className="data-card-subtitle">Subjects requiring reinforcement. Click to see weak topics and study guides.</p>
+                  {(!studentAnalytics.subjectWeaknesses || studentAnalytics.subjectWeaknesses.length === 0) ? (
+                    <p style={{ color: '#059669', fontSize: '14px' }}>Great job! You have no critical weak subjects below 60%.</p>
                   ) : (
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                      {studentAnalytics.weaknesses.map((t, i) => (
-                        <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 14px', background: '#fef2f2', borderRadius: '8px', border: '1px solid #fecaca', flexWrap: 'wrap', gap: '8px' }}>
-                          <div>
-                            <strong>{t.topic}</strong>
-                            <small style={{ color: '#dc2626', marginLeft: '6px' }}>
-                              ({t.subject && t.subject !== 'STEM' && t.subject !== 'General' ? `${t.subject} • ` : ''}{t.avgPct}%)
-                            </small>
+                    <div>
+                      {studentAnalytics.subjectWeaknesses.map((sub, i) => {
+                        const isExpanded = !!expandedWeakSubjects[sub.subject]
+                        return (
+                          <div key={i} className="subject-accordion-card">
+                            <div
+                              className="subject-accordion-header"
+                              onClick={() => setExpandedWeakSubjects((prev) => ({ ...prev, [sub.subject]: !prev[sub.subject] }))}
+                            >
+                              <div>
+                                <strong style={{ fontSize: '15px', color: '#dc2626' }}>{sub.subject}</strong>
+                                <span style={{ fontSize: '12px', color: '#64748b', marginLeft: '8px' }}>
+                                  ({sub.topics?.length || 0} topics {isExpanded ? '▲' : '▼'})
+                                </span>
+                              </div>
+                              <span style={{ fontWeight: 'bold', color: '#dc2626', fontSize: '16px' }}>{sub.avgPct}%</span>
+                            </div>
+
+                            {isExpanded && (
+                              <div className="subject-accordion-body">
+                                {sub.topics && sub.topics.map((tp, idx) => (
+                                  <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 0', borderBottom: idx < sub.topics.length - 1 ? '1px solid #e2e8f0' : 'none', fontSize: '13px', flexWrap: 'wrap', gap: '6px' }}>
+                                    <span>{tp.topic} <strong style={{ color: '#dc2626' }}>({tp.avgPct}%)</strong></span>
+                                    <button
+                                      onClick={() => {
+                                        setSelectedTopicForStudy(tp.topic)
+                                        handleGenerateMaterials(tp.topic)
+                                        setActiveTab('study_materials')
+                                      }}
+                                      className="btn-primary"
+                                      style={{ padding: '4px 10px', fontSize: '11px' }}
+                                    >
+                                      Study Unit →
+                                    </button>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
                           </div>
-                          <button
-                            onClick={() => {
-                              setSelectedTopicForStudy(t.topic)
-                              handleGenerateMaterials(t.topic)
-                              setActiveTab('study_materials')
-                            }}
-                            className="btn-primary"
-                            style={{ padding: '5px 12px', fontSize: '12px' }}
-                          >
-                            Study Unit →
-                          </button>
-                        </div>
-                      ))}
+                        )
+                      })}
                     </div>
                   )}
                 </div>
               </div>
 
-              {/* Subject Breakdown */}
+              {/* Subject Breakdown: English #1, Mathematics #2, then other subjects */}
               <div className="data-card">
                 <h3>Subject Competency Breakdown</h3>
-                <p className="data-card-subtitle">Your progress across all enrolled subjects.</p>
-                {studentAnalytics.subjectBreakdown.map((sb, idx) => (
+                <p className="data-card-subtitle">Your progress across all enrolled subjects (Core subjects prioritized).</p>
+                {sortSubjectsWithEnglishAndMathFirst(studentAnalytics.subjectBreakdown).map((sb, idx) => (
                   <div key={idx} style={{ marginBottom: '16px' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px', fontSize: '14px' }}>
                       <strong>{sb.subject}</strong>
@@ -1462,7 +1629,6 @@ function App() {
           {quizData && Array.isArray(quizData.questions) && (
             <div className="quiz-container">
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '22px', flexWrap: 'wrap', gap: '8px' }}>
-                {/* Clean Quiz Title — NO '(STEM)' */}
                 <h3 style={{ margin: 0, color: '#1e40af' }}>
                   Quiz: {quizData.topic}
                   {quizData.subject && quizData.subject !== 'STEM' && quizData.subject !== 'General' && (
@@ -1560,47 +1726,361 @@ function App() {
       )}
 
       {/* ============================================================== */}
-      {/* STUDENT TAB 4: MY SCORE RECORDS                                */}
+      {/* STUDENT TAB 4: MY ASSESSMENT HISTORY & SUBJECT AI EVALUATION   */}
       {/* ============================================================== */}
       {currentUser.role === 'student' && activeTab === 'my_scores' && (
         <div className="data-card">
           <h3>My Assessment History</h3>
           <p className="data-card-subtitle">
-            Complete record of your scores across exams, quizzes, assignments, and class participation.
+            Filter your scores by registered subject and generate personalized AI diagnostic assessments.
           </p>
-          {!profile?.scores || profile.scores.length === 0 ? (
-            <p style={{ color: '#64748b' }}>No assessment scores on record yet.</p>
+
+          {/* Subject Filter Tabs */}
+          {studentRegisteredSubjects.length > 1 && (
+            <div className="subject-tabs">
+              {studentRegisteredSubjects.map((sub) => (
+                <button
+                  key={sub}
+                  onClick={() => {
+                    setSelectedSubjectHistory(sub)
+                    setHistoryRecommendation('')
+                  }}
+                  className={`subject-tab-btn ${selectedSubjectHistory === sub ? 'active' : ''}`}
+                >
+                  {sub === 'All' ? 'All Subjects' : sub}
+                </button>
+              ))}
+            </div>
+          )}
+
+          {/* Scores Table */}
+          {filteredHistoryScores.length === 0 ? (
+            <p style={{ color: '#64748b' }}>No assessment scores on record for {selectedSubjectHistory === 'All' ? 'any subject' : selectedSubjectHistory}.</p>
           ) : (
+            <>
+              <table>
+                <thead>
+                  <tr>
+                    <th>Type</th>
+                    <th>Subject</th>
+                    <th>Topic</th>
+                    <th>Score</th>
+                    <th>Percentage</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredHistoryScores.map((s) => {
+                    const pct = s.max_score > 0 ? ((s.score / s.max_score) * 100).toFixed(1) : 0
+                    return (
+                      <tr key={s.id}>
+                        <td><span style={{ textTransform: 'capitalize' }}>{s.type}</span></td>
+                        <td>{s.subject}</td>
+                        <td><strong>{s.topic}</strong></td>
+                        <td>{s.score} / {s.max_score}</td>
+                        <td>
+                          <span style={{ fontWeight: 'bold', color: pct >= 70 ? '#059669' : pct >= 50 ? '#d97706' : '#dc2626' }}>
+                            {pct}%
+                          </span>
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+
+              {/* Subject-Specific AI Assessment Generator for Students */}
+              <div style={{ marginTop: '26px', padding: '20px', background: '#f8fafc', borderRadius: '12px', border: '1px solid #e2e8f0' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
+                  <div>
+                    <h4 style={{ margin: '0 0 4px', color: '#1e40af', fontSize: '16px' }}>
+                      ⚡ AI Diagnostic Assessment for {selectedSubjectHistory === 'All' ? 'All Subjects' : selectedSubjectHistory}
+                    </h4>
+                    <p style={{ margin: 0, fontSize: '13px', color: '#64748b' }}>
+                      Get a personalized evaluation and strategic study recommendations based on your {selectedSubjectHistory === 'All' ? 'overall' : selectedSubjectHistory} scores.
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => fetchStudentSubjectRecommendation(currentUser.student_id, selectedSubjectHistory)}
+                    disabled={loadingHistoryRec}
+                    className="btn-primary"
+                  >
+                    {loadingHistoryRec ? 'Analyzing Performance...' : `Generate AI Assessment`}
+                  </button>
+                </div>
+
+                {loadingHistoryRec && <p style={{ marginTop: '14px', color: '#64748b' }}>Analyzing your performance data...</p>}
+
+                {historyRecommendation && (
+                  <div style={{ marginTop: '16px', padding: '16px 20px', background: 'white', border: '1px solid #cbd5e1', borderRadius: '10px', lineHeight: 1.6, whiteSpace: 'pre-wrap', fontSize: '14px', color: '#1e293b' }}>
+                    {historyRecommendation}
+                  </div>
+                )}
+              </div>
+            </>
+          )}
+        </div>
+      )}
+
+      {/* ============================================================== */}
+      {/* TEACHER INTERACTIVE MODALS & SETTINGS                          */}
+      {/* ============================================================== */}
+
+      {/* 1. Modal: Class Size (Registered Students List) */}
+      {teacherModal === 'class_size' && teacherAnalytics && (
+        <div className="modal-overlay" onClick={() => setTeacherModal(null)}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3 className="modal-title">👥 Registered Students ({teacherAnalytics.totalStudents})</h3>
+              <button className="modal-close-btn" onClick={() => setTeacherModal(null)}>✕</button>
+            </div>
+            <p style={{ fontSize: '13px', color: '#64748b', marginTop: 0 }}>
+              Complete roster of students registered under your classroom.
+            </p>
             <table>
               <thead>
                 <tr>
-                  <th>Type</th>
-                  <th>Subject</th>
-                  <th>Topic</th>
-                  <th>Score</th>
-                  <th>Percentage</th>
+                  <th>Student Name</th>
+                  <th>Class / Grade</th>
+                  <th>Access Code</th>
+                  <th>Action</th>
                 </tr>
               </thead>
               <tbody>
-                {profile.scores.map((s) => {
-                  const pct = s.max_score > 0 ? ((s.score / s.max_score) * 100).toFixed(1) : 0
-                  return (
-                    <tr key={s.id}>
-                      <td><span style={{ textTransform: 'capitalize' }}>{s.type}</span></td>
-                      <td>{s.subject}</td>
-                      <td><strong>{s.topic}</strong></td>
-                      <td>{s.score} / {s.max_score}</td>
-                      <td>
-                        <span style={{ fontWeight: 'bold', color: pct >= 70 ? '#059669' : pct >= 50 ? '#d97706' : '#dc2626' }}>
-                          {pct}%
-                        </span>
-                      </td>
-                    </tr>
-                  )
-                })}
+                {teacherAnalytics.studentsSummary.map((s) => (
+                  <tr key={s.id}>
+                    <td><strong>{s.name}</strong></td>
+                    <td>{s.class_name || 'General'}</td>
+                    <td><code>{s.access_code}</code></td>
+                    <td>
+                      <button
+                        onClick={() => {
+                          setProfileStudentId(s.id)
+                          setActiveTab('profiles')
+                          setTeacherModal(null)
+                        }}
+                        className="btn-secondary"
+                        style={{ padding: '4px 10px', fontSize: '11px' }}
+                      >
+                        Inspect →
+                      </button>
+                    </td>
+                  </tr>
+                ))}
               </tbody>
             </table>
-          )}
+          </div>
+        </div>
+      )}
+
+      {/* 2. Modal: Class Average (Individual Student Composites) */}
+      {teacherModal === 'class_average' && teacherAnalytics && (
+        <div className="modal-overlay" onClick={() => setTeacherModal(null)}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3 className="modal-title">📈 Class Average Breakdown ({teacherAnalytics.classAverage}%)</h3>
+              <button className="modal-close-btn" onClick={() => setTeacherModal(null)}>✕</button>
+            </div>
+            <p style={{ fontSize: '13px', color: '#64748b', marginTop: 0 }}>
+              How each student's weighted composite contributes to the class average.
+            </p>
+            <table>
+              <thead>
+                <tr>
+                  <th>Student Name</th>
+                  <th>Class / Grade</th>
+                  <th>Composite Score</th>
+                  <th>Standing</th>
+                </tr>
+              </thead>
+              <tbody>
+                {teacherAnalytics.studentsSummary.map((s) => (
+                  <tr key={s.id}>
+                    <td><strong>{s.name}</strong></td>
+                    <td>{s.class_name || 'General'}</td>
+                    <td>
+                      <strong style={{ color: s.compositeScore >= 70 ? '#059669' : s.compositeScore >= 50 ? '#d97706' : '#dc2626' }}>
+                        {s.compositeScore}%
+                      </strong>
+                    </td>
+                    <td>
+                      <span className={`badge ${s.compositeScore >= 80 ? 'badge-mastered' : s.compositeScore >= 65 ? 'badge-progress' : 'badge-review'}`}>
+                        {s.compositeScore >= 80 ? 'Advanced' : s.compositeScore >= 65 ? 'Proficient' : s.compositeScore >= 50 ? 'Basic' : 'Needs Help'}
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* 3. Modal: Total Assessments (Assessments Recorded Per Student) */}
+      {teacherModal === 'total_assessments' && teacherAnalytics && (
+        <div className="modal-overlay" onClick={() => setTeacherModal(null)}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3 className="modal-title">📝 Total Assessments Recorded ({teacherAnalytics.totalScores})</h3>
+              <button className="modal-close-btn" onClick={() => setTeacherModal(null)}>✕</button>
+            </div>
+            <p style={{ fontSize: '13px', color: '#64748b', marginTop: 0 }}>
+              Number of exams, quizzes, assignments, and participation scores recorded per student.
+            </p>
+            <table>
+              <thead>
+                <tr>
+                  <th>Student Name</th>
+                  <th>Class / Grade</th>
+                  <th>Assessments Completed</th>
+                  <th>Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                {teacherAnalytics.studentsSummary.map((s) => (
+                  <tr key={s.id}>
+                    <td><strong>{s.name}</strong></td>
+                    <td>{s.class_name || 'General'}</td>
+                    <td>
+                      <strong style={{ color: '#1e40af' }}>{s.scoresCount} assessment{s.scoresCount !== 1 ? 's' : ''}</strong>
+                    </td>
+                    <td>
+                      <button
+                        onClick={() => {
+                          setProfileStudentId(s.id)
+                          setActiveTab('profiles')
+                          setTeacherModal(null)
+                        }}
+                        className="btn-secondary"
+                        style={{ padding: '4px 10px', fontSize: '11px' }}
+                      >
+                        View Records →
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* 4. Modal: Students Needing Support */}
+      {teacherModal === 'needing_support' && teacherAnalytics && (
+        <div className="modal-overlay" onClick={() => setTeacherModal(null)}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3 className="modal-title">⚠️ Students Needing Academic Support</h3>
+              <button className="modal-close-btn" onClick={() => setTeacherModal(null)}>✕</button>
+            </div>
+            <p style={{ fontSize: '13px', color: '#64748b', marginTop: 0 }}>
+              Students identified with weighted composite below 60% or struggling on key topics.
+            </p>
+            {teacherAnalytics.atRiskStudents.length === 0 ? (
+              <p style={{ color: '#059669', padding: '12px 0' }}>🎉 Excellent! No students currently flagged below 60%.</p>
+            ) : (
+              <table>
+                <thead>
+                  <tr>
+                    <th>Student Name</th>
+                    <th>Class / Grade</th>
+                    <th>Composite</th>
+                    <th>Topics Needing Review</th>
+                    <th>Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {teacherAnalytics.atRiskStudents.map((s) => (
+                    <tr key={s.id}>
+                      <td><strong>{s.name}</strong></td>
+                      <td>{s.class_name || 'General'}</td>
+                      <td><strong style={{ color: '#dc2626' }}>{s.compositeScore}%</strong></td>
+                      <td>
+                        <span style={{ fontSize: '12px', color: '#64748b' }}>
+                          {s.weakTopics?.length > 0 ? s.weakTopics.join(', ') : 'Low composite average'}
+                        </span>
+                      </td>
+                      <td>
+                        <button
+                          onClick={() => {
+                            setProfileStudentId(s.id)
+                            setActiveTab('profiles')
+                            setTeacherModal(null)
+                          }}
+                          className="btn-secondary"
+                          style={{ padding: '4px 10px', fontSize: '11px' }}
+                        >
+                          Inspect →
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* 5. Modal: Teacher Account & Profile Settings */}
+      {teacherModal === 'profile_settings' && (
+        <div className="modal-overlay" onClick={() => setTeacherModal(null)}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '480px' }}>
+            <div className="modal-header">
+              <h3 className="modal-title">⚙️ Teacher Account Settings</h3>
+              <button className="modal-close-btn" onClick={() => setTeacherModal(null)}>✕</button>
+            </div>
+            <p style={{ fontSize: '13px', color: '#64748b', marginTop: 0 }}>
+              Update your name, email address, or set a new password.
+            </p>
+            <form onSubmit={handleUpdateTeacherProfile} style={{ display: 'flex', flexDirection: 'column', gap: '14px', border: 'none', padding: 0, boxShadow: 'none' }}>
+              <label>
+                Full Name:
+                <input
+                  value={editTeacherName}
+                  onChange={(e) => setEditTeacherName(e.target.value)}
+                  placeholder="e.g. Damilare"
+                  required
+                />
+              </label>
+
+              <label>
+                Email Address:
+                <input
+                  type="email"
+                  value={editTeacherEmail}
+                  onChange={(e) => setEditTeacherEmail(e.target.value)}
+                  placeholder="name@school.edu"
+                  required
+                />
+              </label>
+
+              <label>
+                New Password (leave blank to keep current):
+                <input
+                  type="password"
+                  value={editTeacherPassword}
+                  onChange={(e) => setEditTeacherPassword(e.target.value)}
+                  placeholder="••••••••"
+                />
+              </label>
+
+              <button type="submit" disabled={updatingProfile} className="btn-primary" style={{ marginTop: '8px' }}>
+                {updatingProfile ? 'Saving Changes...' : 'Save Profile Changes'}
+              </button>
+
+              {editTeacherMessage && (
+                <p style={{ margin: 0, padding: '10px 14px', background: '#ecfdf5', color: '#065f46', border: '1px solid #a7f3d0', borderRadius: '8px', fontSize: '13px' }}>
+                  {editTeacherMessage}
+                </p>
+              )}
+
+              {editTeacherError && (
+                <p style={{ margin: 0, padding: '10px 14px', background: '#fef2f2', color: '#dc2626', border: '1px solid #fecaca', borderRadius: '8px', fontSize: '13px' }}>
+                  {editTeacherError}
+                </p>
+              )}
+            </form>
+          </div>
         </div>
       )}
     </div>

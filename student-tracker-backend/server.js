@@ -263,22 +263,82 @@ app.post('/api/reset-password', requireDb, async (req, res) => {
   }
 });
 
-// Get students belonging to a specific teacher
+// Update Teacher Profile (name, email, password)
+app.post('/api/teachers/update-profile', requireDb, async (req, res) => {
+  try {
+    const db = req.db;
+    const { teacherId, name, email, newPassword } = req.body;
+
+    if (!teacherId) {
+      return res.status(400).json({ error: 'teacherId is required.' });
+    }
+
+    const userDocRef = db.collection('users').doc(teacherId);
+    const userDoc = await userDocRef.get();
+
+    if (!userDoc.exists) {
+      return res.status(404).json({ error: 'Teacher account not found.' });
+    }
+
+    const updateData = {};
+    if (name && name.trim()) {
+      updateData.name = name.trim();
+    }
+
+    if (email && email.trim()) {
+      const normalizedEmail = email.toLowerCase().trim();
+      const existing = await db.collection('users').where('email', '==', normalizedEmail).get();
+      if (!existing.empty && existing.docs[0].id !== teacherId) {
+        return res.status(400).json({ error: 'This email is already in use by another account.' });
+      }
+      updateData.email = normalizedEmail;
+    }
+
+    if (newPassword && newPassword.trim()) {
+      if (newPassword.trim().length < 6) {
+        return res.status(400).json({ error: 'New password must be at least 6 characters long.' });
+      }
+      updateData.password = bcrypt.hashSync(newPassword.trim(), 10);
+    }
+
+    updateData.updatedAt = new Date().toISOString();
+    await userDocRef.update(updateData);
+
+    const updatedDoc = await userDocRef.get();
+    const data = updatedDoc.data();
+
+    res.json({
+      id: updatedDoc.id,
+      name: data.name,
+      email: data.email,
+      role: data.role,
+      message: 'Profile updated successfully!',
+    });
+  } catch (err) {
+    console.error('Update teacher profile error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Get students belonging to a specific teacher OR all school students
 app.get('/api/students', requireDb, async (req, res) => {
   try {
     const db = req.db;
     const { teacher_id } = req.query;
 
-    let queryRef = db.collection('students');
-    if (teacher_id) {
-      queryRef = queryRef.where('teacher_id', '==', String(teacher_id));
-    }
-
-    const snapshot = await queryRef.get();
-    const students = snapshot.docs.map((doc) => ({
+    const snapshot = await db.collection('students').get();
+    let students = snapshot.docs.map((doc) => ({
       id: doc.id,
       ...doc.data(),
     }));
+
+    if (teacher_id) {
+      students = students.filter((s) => {
+        if (s.teacher_id === String(teacher_id)) return true;
+        if (Array.isArray(s.teacher_ids) && s.teacher_ids.includes(String(teacher_id))) return true;
+        return false;
+      });
+    }
 
     res.json(students);
   } catch (err) {
@@ -287,7 +347,7 @@ app.get('/api/students', requireDb, async (req, res) => {
   }
 });
 
-// Add a new student
+// Add a new student (reusing existing student record and code if already registered in school)
 app.post('/api/students', requireDb, async (req, res) => {
   try {
     const db = req.db;
@@ -301,20 +361,57 @@ app.post('/api/students', requireDb, async (req, res) => {
       return res.status(400).json({ error: 'Student name is required.' });
     }
 
+    const trimmedName = name.trim();
+    const trimmedClass = (class_name || '').trim();
+
+    // Check if a student with the same name and class already exists in the school database
+    const allStudentsSnapshot = await db.collection('students').get();
+    const existingStudentDoc = allStudentsSnapshot.docs.find((d) => {
+      const data = d.data();
+      return (
+        data.name.toLowerCase() === trimmedName.toLowerCase() &&
+        (data.class_name || '').toLowerCase() === trimmedClass.toLowerCase()
+      );
+    });
+
+    if (existingStudentDoc) {
+      // Re-use this student and their existing access code so students don't need a new signup
+      const data = existingStudentDoc.data();
+      const currentTeachers = Array.isArray(data.teacher_ids)
+        ? data.teacher_ids
+        : [data.teacher_id].filter(Boolean);
+
+      if (!currentTeachers.includes(String(teacher_id))) {
+        currentTeachers.push(String(teacher_id));
+        await db.collection('students').doc(existingStudentDoc.id).update({
+          teacher_ids: currentTeachers,
+        });
+      }
+
+      return res.json({
+        id: existingStudentDoc.id,
+        name: data.name,
+        class_name: data.class_name,
+        access_code: data.access_code,
+        message: 'Linked to existing student record and access code.',
+      });
+    }
+
     const access_code = generateAccessCode();
 
     const newStudentRef = await db.collection('students').add({
-      name: name.trim(),
-      class_name: class_name || '',
+      name: trimmedName,
+      class_name: trimmedClass,
       teacher_id: String(teacher_id),
+      teacher_ids: [String(teacher_id)],
       access_code,
       createdAt: new Date().toISOString(),
     });
 
     res.json({
       id: newStudentRef.id,
-      name: name.trim(),
-      class_name: class_name || '',
+      name: trimmedName,
+      class_name: trimmedClass,
       teacher_id: String(teacher_id),
       access_code,
     });
@@ -380,7 +477,7 @@ app.get('/api/students/:id/profile', requireDb, async (req, res) => {
   }
 });
 
-// AI recommendation
+// AI recommendation (optionally filtered by subject)
 app.get('/api/students/:id/recommendation', requireDb, async (req, res) => {
   try {
     const db = req.db;
@@ -390,18 +487,25 @@ app.get('/api/students/:id/recommendation', requireDb, async (req, res) => {
       return res.status(404).json({ error: 'Student not found' });
     }
 
+    const studentName = studentDoc.data().name || 'Student';
+    const requestedSubject = req.query.subject;
+
     const scoresSnapshot = await db
       .collection('scores')
       .where('student_id', '==', String(req.params.id))
       .get();
 
-    const scores = scoresSnapshot.docs.map((doc) => ({
+    let scores = scoresSnapshot.docs.map((doc) => ({
       id: doc.id,
       ...doc.data(),
     }));
 
+    if (requestedSubject && requestedSubject !== 'All' && requestedSubject !== 'All Subjects') {
+      scores = scores.filter((s) => (s.subject || '').toLowerCase() === requestedSubject.toLowerCase());
+    }
+
     if (scores.length === 0) {
-      return res.json({ recommendation: 'No scores recorded yet for this student.' });
+      return res.json({ recommendation: `No assessment scores recorded yet for ${requestedSubject || 'this student'}.` });
     }
 
     if (!groq) {
@@ -410,7 +514,7 @@ app.get('/api/students/:id/recommendation', requireDb, async (req, res) => {
       });
     }
 
-    const prompt = `Here is a student's performance data across exams, quizzes, assignments, and participation: ${JSON.stringify(scores)}.
+    const prompt = `Here is student "${studentName}"'s performance data${requestedSubject && requestedSubject !== 'All' ? ` in ${requestedSubject}` : ''} across exams, quizzes, assignments, and class participation: ${JSON.stringify(scores)}.
 
 IMPORTANT RULES:
 - Base your entire response ONLY on the data provided above. Do not invent or assume any strengths, habits, or behaviors that are not directly shown in the data.
@@ -418,7 +522,7 @@ IMPORTANT RULES:
 - If there is only one score on record, say so explicitly and note that more data would give a fuller picture.
 
 Based strictly on the data given, write a summary with:
-1. An honest assessment of their actual performance level
+1. An honest assessment of their actual performance level${requestedSubject ? ` in ${requestedSubject}` : ''}
 2. Specific strengths ONLY if the data supports them
 3. Specific weak areas based on the actual topics/scores shown
 4. 2-3 concrete, realistic next steps for studying THIS specific weak topic
@@ -468,12 +572,14 @@ app.get('/api/teachers/:teacherId/analytics', requireDb, async (req, res) => {
     const db = req.db;
     const teacherId = req.params.teacherId;
 
-    const studentsSnapshot = await db
-      .collection('students')
-      .where('teacher_id', '==', teacherId)
-      .get();
-
-    const students = studentsSnapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
+    const allStudentsSnapshot = await db.collection('students').get();
+    const students = allStudentsSnapshot.docs
+      .map((d) => ({ id: d.id, ...d.data() }))
+      .filter((s) => {
+        if (s.teacher_id === String(teacherId)) return true;
+        if (Array.isArray(s.teacher_ids) && s.teacher_ids.includes(String(teacherId))) return true;
+        return false;
+      });
 
     if (students.length === 0) {
       return res.json({
@@ -553,17 +659,34 @@ app.get('/api/teachers/:teacherId/analytics', requireDb, async (req, res) => {
       ? Number((totalCompositeSum / studentsWithScoresCount).toFixed(1))
       : 0;
 
-    // Aggregate topic difficulty across class
+    // Aggregate topic difficulty across class by Assessment Category
     const topicAgg = {};
     classScores.forEach((s) => {
       if (!s.topic) return;
       const key = s.topic.trim();
       if (!topicAgg[key]) {
-        topicAgg[key] = { topic: key, subject: s.subject || 'General', totalScore: 0, totalMax: 0, count: 0 };
+        topicAgg[key] = {
+          topic: key,
+          subject: s.subject || 'General',
+          totalScore: 0,
+          totalMax: 0,
+          count: 0,
+          byCategory: {
+            exam: 0,
+            quiz: 0,
+            assignment: 0,
+            participation: 0,
+          },
+        };
       }
       topicAgg[key].totalScore += Number(s.score) || 0;
       topicAgg[key].totalMax += Number(s.max_score) || 0;
       topicAgg[key].count++;
+
+      const cat = (s.type || 'quiz').toLowerCase();
+      if (topicAgg[key].byCategory[cat] !== undefined) {
+        topicAgg[key].byCategory[cat]++;
+      }
     });
 
     const topicPerformance = Object.values(topicAgg).map((t) => {
@@ -576,6 +699,7 @@ app.get('/api/teachers/:teacherId/analytics', requireDb, async (req, res) => {
         subject: t.subject,
         avgPct,
         count: t.count,
+        byCategory: t.byCategory,
         status,
       };
     }).sort((a, b) => a.avgPct - b.avgPct);
@@ -612,21 +736,48 @@ app.get('/api/students/:id/analytics', requireDb, async (req, res) => {
     const scores = scoresSnapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
     const compositeScore = calculateCompositeScore(scores);
 
-    // Subject breakdown
+    // Subject breakdown with topic grouping
     const subjectMap = {};
     scores.forEach((s) => {
       const sub = s.subject || 'General';
-      if (!subjectMap[sub]) subjectMap[sub] = { subject: sub, totalScore: 0, totalMax: 0 };
+      if (!subjectMap[sub]) {
+        subjectMap[sub] = { subject: sub, totalScore: 0, totalMax: 0, scoresCount: 0, topics: {} };
+      }
       subjectMap[sub].totalScore += Number(s.score) || 0;
       subjectMap[sub].totalMax += Number(s.max_score) || 0;
+      subjectMap[sub].scoresCount++;
+
+      if (s.topic) {
+        const top = s.topic.trim();
+        if (!subjectMap[sub].topics[top]) {
+          subjectMap[sub].topics[top] = { topic: top, totalScore: 0, totalMax: 0, count: 0 };
+        }
+        subjectMap[sub].topics[top].totalScore += Number(s.score) || 0;
+        subjectMap[sub].topics[top].totalMax += Number(s.max_score) || 0;
+        subjectMap[sub].topics[top].count++;
+      }
     });
 
-    const subjectBreakdown = Object.values(subjectMap).map((sm) => ({
-      subject: sm.subject,
-      avgPct: sm.totalMax > 0 ? Number(((sm.totalScore / sm.totalMax) * 100).toFixed(1)) : 0,
-    }));
+    const subjectBreakdown = Object.values(subjectMap).map((sm) => {
+      const avgPct = sm.totalMax > 0 ? Number(((sm.totalScore / sm.totalMax) * 100).toFixed(1)) : 0;
+      const topicList = Object.values(sm.topics).map((tp) => ({
+        topic: tp.topic,
+        avgPct: tp.totalMax > 0 ? Number(((tp.totalScore / tp.totalMax) * 100).toFixed(1)) : 0,
+        count: tp.count,
+      }));
+      return {
+        subject: sm.subject,
+        avgPct,
+        scoresCount: sm.scoresCount,
+        topics: topicList,
+      };
+    });
 
-    // Topic breakdown
+    // Subject-level strengths (>=75%) and focus areas (<60%)
+    const subjectStrengths = subjectBreakdown.filter((s) => s.avgPct >= 75);
+    const subjectWeaknesses = subjectBreakdown.filter((s) => s.avgPct < 60);
+
+    // Overall topic breakdown
     const topicMap = {};
     scores.forEach((s) => {
       if (!s.topic) return;
@@ -653,6 +804,8 @@ app.get('/api/students/:id/analytics', requireDb, async (req, res) => {
       compositeScore,
       totalScores: scores.length,
       subjectBreakdown,
+      subjectStrengths,
+      subjectWeaknesses,
       topics,
       strengths,
       weaknesses,
