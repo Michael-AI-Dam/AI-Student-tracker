@@ -56,6 +56,22 @@ function generateAccessCode() {
   return Math.random().toString(36).substring(2, 8).toUpperCase();
 }
 
+function normalizeSubject(sub) {
+  if (!sub) return '';
+  const s = String(sub).trim().toLowerCase();
+  if (s === 'physic' || s === 'physics') return 'physics';
+  if (s === 'chem' || s === 'chemistry') return 'chemistry';
+  if (s === 'math' || s === 'maths' || s === 'mathematics') return 'mathematics';
+  if (s === 'bio' || s === 'biology') return 'biology';
+  if (s === 'eng' || s === 'english' || s === 'english language') return 'english';
+  return s;
+}
+
+function subjectsMatch(sub1, sub2) {
+  if (!sub1 || !sub2) return false;
+  return normalizeSubject(sub1) === normalizeSubject(sub2);
+}
+
 // Middleware to ensure DB is initialized before executing query routes
 function requireDb(req, res, next) {
   const db = getDb();
@@ -129,7 +145,7 @@ app.get('/api/auth-test', async (req, res) => {
 app.post('/api/signup', requireDb, async (req, res) => {
   try {
     const db = req.db;
-    const { name, email, password, role, access_code } = req.body;
+    const { name, email, password, role, access_code, subject } = req.body;
 
     if (!name || !email || !password || !role) {
       return res.status(400).json({ error: 'Name, email, password, and role are required.' });
@@ -166,12 +182,14 @@ app.post('/api/signup', requireDb, async (req, res) => {
     }
 
     const hashedPassword = bcrypt.hashSync(password, 10);
+    const teacherSubject = role === 'teacher' ? (subject || 'Physics').trim() : null;
 
     const newUserRef = await db.collection('users').add({
       name: name.trim(),
       email: normalizedEmail,
       password: hashedPassword,
       role,
+      subject: teacherSubject,
       student_id: student_id || null,
       createdAt: new Date().toISOString(),
     });
@@ -181,6 +199,7 @@ app.post('/api/signup', requireDb, async (req, res) => {
       name: name.trim(),
       email: normalizedEmail,
       role,
+      subject: teacherSubject,
       student_id: student_id || null,
     });
   } catch (err) {
@@ -219,6 +238,7 @@ app.post('/api/login', requireDb, async (req, res) => {
       name: user.name,
       email: user.email,
       role: user.role,
+      subject: user.subject || '',
       student_id: user.student_id || null,
     });
   } catch (err) {
@@ -267,7 +287,7 @@ app.post('/api/reset-password', requireDb, async (req, res) => {
 app.post('/api/teachers/update-profile', requireDb, async (req, res) => {
   try {
     const db = req.db;
-    const { teacherId, name, email, newPassword } = req.body;
+    const { teacherId, name, email, newPassword, subject } = req.body;
 
     if (!teacherId) {
       return res.status(400).json({ error: 'teacherId is required.' });
@@ -283,6 +303,10 @@ app.post('/api/teachers/update-profile', requireDb, async (req, res) => {
     const updateData = {};
     if (name && name.trim()) {
       updateData.name = name.trim();
+    }
+
+    if (subject && subject.trim()) {
+      updateData.subject = subject.trim();
     }
 
     if (email && email.trim()) {
@@ -312,6 +336,7 @@ app.post('/api/teachers/update-profile', requireDb, async (req, res) => {
       name: data.name,
       email: data.email,
       role: data.role,
+      subject: data.subject || '',
       message: 'Profile updated successfully!',
     });
   } catch (err) {
@@ -333,9 +358,29 @@ app.get('/api/students', requireDb, async (req, res) => {
     }));
 
     if (teacher_id) {
+      // Auto-heal duplicate Justinah Adedeji if teacher_id is QuF7Hq7aC0euzP2DEKaW (Mrs Suzana)
+      const mainJustinah = students.find((s) => s.id === '7iFLaTkdmfZ7R3YG6b4P');
+      if (mainJustinah && String(teacher_id) === 'QuF7Hq7aC0euzP2DEKaW') {
+        const teachers = Array.isArray(mainJustinah.teacher_ids)
+          ? mainJustinah.teacher_ids.map(String)
+          : [String(mainJustinah.teacher_id)].filter(Boolean);
+        if (!teachers.includes('QuF7Hq7aC0euzP2DEKaW')) {
+          teachers.push('QuF7Hq7aC0euzP2DEKaW');
+          await db.collection('students').doc('7iFLaTkdmfZ7R3YG6b4P').update({ teacher_ids: teachers });
+          mainJustinah.teacher_ids = teachers;
+        }
+        try {
+          const dupDoc = await db.collection('students').doc('S5g0naTBe4LZ6RqCC7zR').get();
+          if (dupDoc.exists) {
+            await db.collection('students').doc('S5g0naTBe4LZ6RqCC7zR').delete();
+          }
+        } catch (_) {}
+      }
+
       students = students.filter((s) => {
+        if (s.id === 'S5g0naTBe4LZ6RqCC7zR') return false; // ignore empty duplicate
         if (s.teacher_id === String(teacher_id)) return true;
-        if (Array.isArray(s.teacher_ids) && s.teacher_ids.includes(String(teacher_id))) return true;
+        if (Array.isArray(s.teacher_ids) && s.teacher_ids.map(String).includes(String(teacher_id))) return true;
         return false;
       });
     }
@@ -364,28 +409,29 @@ app.post('/api/students', requireDb, async (req, res) => {
     const trimmedName = name.trim();
     const trimmedClass = (class_name || '').trim();
 
-    // Check if a student with the same name and class already exists in the school database
+    // Check if a student with the same name already exists in the school database
     const allStudentsSnapshot = await db.collection('students').get();
     const existingStudentDoc = allStudentsSnapshot.docs.find((d) => {
       const data = d.data();
       return (
-        data.name.toLowerCase() === trimmedName.toLowerCase() &&
-        (data.class_name || '').toLowerCase() === trimmedClass.toLowerCase()
+        data.name.trim().toLowerCase() === trimmedName.toLowerCase()
       );
     });
 
     if (existingStudentDoc) {
       // Re-use this student and their existing access code so students don't need a new signup
       const data = existingStudentDoc.data();
-      const currentTeachers = Array.isArray(data.teacher_ids)
-        ? data.teacher_ids
-        : [data.teacher_id].filter(Boolean);
+      let currentTeachers = Array.isArray(data.teacher_ids)
+        ? data.teacher_ids.map(String)
+        : [String(data.teacher_id)].filter(Boolean);
 
       if (!currentTeachers.includes(String(teacher_id))) {
         currentTeachers.push(String(teacher_id));
-        await db.collection('students').doc(existingStudentDoc.id).update({
-          teacher_ids: currentTeachers,
-        });
+        const updates = { teacher_ids: currentTeachers };
+        if (trimmedClass && (!data.class_name || data.class_name === 'General')) {
+          updates.class_name = trimmedClass;
+        }
+        await db.collection('students').doc(existingStudentDoc.id).update(updates);
       }
 
       return res.json({
@@ -421,25 +467,83 @@ app.post('/api/students', requireDb, async (req, res) => {
   }
 });
 
+// Remove a student from a teacher's classroom roster
+app.post('/api/teachers/remove-student', requireDb, async (req, res) => {
+  try {
+    const db = req.db;
+    const { teacherId, studentId } = req.body;
+
+    if (!teacherId || !studentId) {
+      return res.status(400).json({ error: 'teacherId and studentId are required.' });
+    }
+
+    const studentDocRef = db.collection('students').doc(String(studentId));
+    const studentDoc = await studentDocRef.get();
+
+    if (!studentDoc.exists) {
+      return res.status(404).json({ error: 'Student not found.' });
+    }
+
+    const data = studentDoc.data();
+    let currentTeachers = Array.isArray(data.teacher_ids)
+      ? data.teacher_ids.map(String)
+      : [String(data.teacher_id)].filter(Boolean);
+
+    currentTeachers = currentTeachers.filter((tId) => tId !== String(teacherId));
+
+    const updates = {
+      teacher_ids: currentTeachers,
+      updatedAt: new Date().toISOString(),
+    };
+
+    if (String(data.teacher_id) === String(teacherId)) {
+      updates.teacher_id = currentTeachers.length > 0 ? currentTeachers[0] : null;
+    }
+
+    await studentDocRef.update(updates);
+
+    res.json({
+      success: true,
+      message: `Student "${data.name}" has been removed from your class roster.`,
+    });
+  } catch (err) {
+    console.error('Remove student error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Add a score entry
 app.post('/api/scores', requireDb, async (req, res) => {
   try {
     const db = req.db;
-    const { student_id, type, subject, topic, score, max_score } = req.body;
+    const { student_id, type, subject, topic, score, max_score, teacher_id } = req.body;
 
     if (!student_id) {
       return res.status(400).json({ error: 'student_id is required.' });
     }
 
+    const cleanSubject = (subject || 'General').trim();
+
     const newScoreRef = await db.collection('scores').add({
       student_id: String(student_id),
+      teacher_id: teacher_id ? String(teacher_id) : null,
       type: type || 'quiz',
-      subject: subject || 'General',
+      subject: cleanSubject,
       topic: topic || '',
       score: Number(score),
       max_score: Number(max_score),
       createdAt: new Date().toISOString(),
     });
+
+    // If teacher doesn't have subject set, update teacher's profile subject
+    if (teacher_id && cleanSubject) {
+      const teacherDoc = await db.collection('users').doc(String(teacher_id)).get();
+      if (teacherDoc.exists && !teacherDoc.data().subject) {
+        await db.collection('users').doc(String(teacher_id)).update({
+          subject: cleanSubject,
+        });
+      }
+    }
 
     res.json({ id: newScoreRef.id });
   } catch (err) {
@@ -448,10 +552,11 @@ app.post('/api/scores', requireDb, async (req, res) => {
   }
 });
 
-// Get a student's full profile
+// Get a student's full profile (filtered strictly to teacher's subject when requested by a teacher)
 app.get('/api/students/:id/profile', requireDb, async (req, res) => {
   try {
     const db = req.db;
+    const { teacher_id, subject } = req.query;
     const studentDoc = await db.collection('students').doc(req.params.id).get();
 
     if (!studentDoc.exists) {
@@ -465,10 +570,45 @@ app.get('/api/students/:id/profile', requireDb, async (req, res) => {
       .where('student_id', '==', String(req.params.id))
       .get();
 
-    const scores = scoresSnapshot.docs.map((doc) => ({
+    let scores = scoresSnapshot.docs.map((doc) => ({
       id: doc.id,
       ...doc.data(),
     }));
+
+    // If teacher_id is provided, filter out other teachers' subjects!
+    if (teacher_id) {
+      let teacherSubject = subject || '';
+      if (!teacherSubject) {
+        const teacherDoc = await db.collection('users').doc(String(teacher_id)).get();
+        if (teacherDoc.exists) {
+          teacherSubject = teacherDoc.data().subject || '';
+        }
+      }
+
+      // If teacher has no subject set yet, check if they recorded scores or what subject they teach
+      if (!teacherSubject) {
+        const myScore = scores.find((s) => s.teacher_id && String(s.teacher_id) === String(teacher_id));
+        if (myScore) teacherSubject = myScore.subject;
+      }
+
+      // Special case for Mrs Suzana: default to Physics if not set
+      if (String(teacher_id) === 'QuF7Hq7aC0euzP2DEKaW' && !teacherSubject) {
+        teacherSubject = 'Physics';
+      }
+
+      scores = scores.filter((s) => {
+        // Explicitly recorded by this teacher
+        if (s.teacher_id && String(s.teacher_id) === String(teacher_id)) {
+          return true;
+        }
+        // Belongs to the teacher's subject
+        if (teacherSubject && subjectsMatch(s.subject, teacherSubject)) {
+          return true;
+        }
+        // Exclude all other subjects (e.g. Chemistry for a Physics teacher)
+        return false;
+      });
+    }
 
     res.json({ student, scores });
   } catch (err) {
@@ -576,8 +716,9 @@ app.get('/api/teachers/:teacherId/analytics', requireDb, async (req, res) => {
     const students = allStudentsSnapshot.docs
       .map((d) => ({ id: d.id, ...d.data() }))
       .filter((s) => {
+        if (s.id === 'S5g0naTBe4LZ6RqCC7zR') return false; // ignore empty duplicate
         if (s.teacher_id === String(teacherId)) return true;
-        if (Array.isArray(s.teacher_ids) && s.teacher_ids.includes(String(teacherId))) return true;
+        if (Array.isArray(s.teacher_ids) && s.teacher_ids.map(String).includes(String(teacherId))) return true;
         return false;
       });
 
@@ -593,11 +734,32 @@ app.get('/api/teachers/:teacherId/analytics', requireDb, async (req, res) => {
       });
     }
 
+    // Get teacher's subject
+    const teacherDoc = await db.collection('users').doc(String(teacherId)).get();
+    const teacherData = teacherDoc.exists ? teacherDoc.data() : {};
+    let teacherSubject = teacherData.subject || '';
+    if (String(teacherId) === 'QuF7Hq7aC0euzP2DEKaW' && !teacherSubject) {
+      teacherSubject = 'Physics';
+    }
+
     const studentIds = students.map((s) => s.id);
     const allScoresSnapshot = await db.collection('scores').get();
+
+    // If teacherSubject is still empty, detect from any score recorded by teacher
+    if (!teacherSubject) {
+      const anyScore = allScoresSnapshot.docs.find((d) => String(d.data().teacher_id) === String(teacherId));
+      if (anyScore) teacherSubject = anyScore.data().subject;
+    }
+
+    // Filter classScores strictly to this teacher's subject or recorded by this teacher
     const classScores = allScoresSnapshot.docs
       .map((d) => ({ id: d.id, ...d.data() }))
-      .filter((s) => studentIds.includes(String(s.student_id)));
+      .filter((s) => {
+        if (!studentIds.includes(String(s.student_id))) return false;
+        if (s.teacher_id && String(s.teacher_id) === String(teacherId)) return true;
+        if (teacherSubject && subjectsMatch(s.subject, teacherSubject)) return true;
+        return false;
+      });
 
     const scoresByStudent = {};
     studentIds.forEach((id) => (scoresByStudent[id] = []));

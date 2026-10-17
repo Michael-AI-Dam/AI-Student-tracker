@@ -12,6 +12,7 @@ function App() {
   const [authPassword, setAuthPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
   const [authRole, setAuthRole] = useState('teacher')
+  const [authSubject, setAuthSubject] = useState('Physics')
   const [accessCode, setAccessCode] = useState('')
   const [authError, setAuthError] = useState('')
   const [authSuccess, setAuthSuccess] = useState('')
@@ -30,6 +31,7 @@ function App() {
   const [teacherModal, setTeacherModal] = useState(null)
   const [editTeacherName, setEditTeacherName] = useState('')
   const [editTeacherEmail, setEditTeacherEmail] = useState('')
+  const [editTeacherSubject, setEditTeacherSubject] = useState('')
   const [editTeacherPassword, setEditTeacherPassword] = useState('')
   const [editTeacherMessage, setEditTeacherMessage] = useState('')
   const [editTeacherError, setEditTeacherError] = useState('')
@@ -42,7 +44,7 @@ function App() {
 
   const [studentId, setStudentId] = useState('')
   const [scoreType, setScoreType] = useState('quiz')
-  const [subject, setSubject] = useState('Chemistry')
+  const [subject, setSubject] = useState('Physics')
   const [topic, setTopic] = useState('')
   const [scoreVal, setScoreVal] = useState('')
   const [maxScoreVal, setMaxScoreVal] = useState('')
@@ -114,8 +116,12 @@ function App() {
         if (Array.isArray(data)) {
           setStudents(data)
           if (data.length > 0) {
-            setStudentId((prev) => prev || data[0].id)
-            setProfileStudentId((prev) => prev || data[0].id)
+            setStudentId((prev) => (data.some((s) => s.id === prev) ? prev : data[0].id))
+            setProfileStudentId((prev) => (data.some((s) => s.id === prev) ? prev : data[0].id))
+          } else {
+            setStudentId('')
+            setProfileStudentId('')
+            setProfile(null)
           }
         } else {
           setStudents([])
@@ -156,7 +162,9 @@ function App() {
   }
 
   const fetchProfile = (id) => {
-    fetch(`${API_URL}/api/students/${encodeURIComponent(id)}/profile`)
+    if (!id) return
+    const query = currentUser?.role === 'teacher' ? `?teacher_id=${encodeURIComponent(currentUser.id)}` : ''
+    fetch(`${API_URL}/api/students/${encodeURIComponent(id)}/profile${query}`)
       .then((res) => res.json())
       .then((data) => setProfile(data))
       .catch((err) => console.error('Fetch profile error:', err))
@@ -234,6 +242,10 @@ function App() {
       fetchTeacherAnalytics(currentUser.id)
       setEditTeacherName(currentUser.name || '')
       setEditTeacherEmail(currentUser.email || '')
+      setEditTeacherSubject(currentUser.subject || 'Physics')
+      if (currentUser.subject) {
+        setSubject(currentUser.subject)
+      }
     } else if (currentUser?.role === 'student' && currentUser.student_id) {
       setProfileStudentId(currentUser.student_id)
       fetchProfile(currentUser.student_id)
@@ -277,6 +289,7 @@ function App() {
         email: authEmail,
         password: authPassword,
         role: authRole,
+        subject: authRole === 'teacher' ? authSubject : null,
         access_code: authRole === 'student' ? accessCode : null,
       }),
     })
@@ -335,6 +348,7 @@ function App() {
         teacherId: currentUser.id,
         name: editTeacherName,
         email: editTeacherEmail,
+        subject: editTeacherSubject,
         newPassword: editTeacherPassword || undefined,
       }),
     })
@@ -342,13 +356,22 @@ function App() {
         const data = await res.json()
         setUpdatingProfile(false)
         if (!res.ok) throw new Error(data.error || 'Failed to update profile')
-        setCurrentUser((prev) => ({
-          ...prev,
+        const updatedUser = {
+          ...currentUser,
           name: data.name,
           email: data.email,
-        }))
-        setEditTeacherMessage('Profile updated successfully!')
+          subject: data.subject || editTeacherSubject,
+        }
+        setCurrentUser(updatedUser)
+        if (data.subject || editTeacherSubject) {
+          setSubject(data.subject || editTeacherSubject)
+        }
+        setEditTeacherMessage('Profile and subject updated successfully!')
         setEditTeacherPassword('')
+        fetchTeacherAnalytics(currentUser.id)
+        if (profileStudentId) {
+          fetchProfile(profileStudentId)
+        }
       })
       .catch((err) => {
         setUpdatingProfile(false)
@@ -400,6 +423,34 @@ function App() {
       .catch((err) => setStudentMessage('Error: ' + err.message))
   }
 
+  const handleRemoveStudent = (student) => {
+    if (!student || !student.id) return
+    const studentLabel = formatStudentLabel(student.name, student.class_name)
+    if (!window.confirm(`Are you sure you want to remove "${studentLabel}" from your class roster?\n\nThey will no longer appear in your classroom or analytics.`)) {
+      return
+    }
+    fetch(`${API_URL}/api/teachers/remove-student`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        teacherId: currentUser.id,
+        studentId: student.id,
+      }),
+    })
+      .then(async (res) => {
+        const data = await res.json()
+        if (!res.ok) throw new Error(data.error || 'Failed to remove student')
+        setStudentMessage(data.message || `Student removed from class roster.`)
+        fetchStudents(currentUser.id)
+        fetchTeacherAnalytics(currentUser.id)
+        if (String(profileStudentId) === String(student.id)) {
+          setProfile(null)
+          setProfileStudentId('')
+        }
+      })
+      .catch((err) => alert('Error removing student: ' + err.message))
+  }
+
   const handleAddScore = (e) => {
     e.preventDefault()
     setScoreMessage('')
@@ -408,6 +459,7 @@ function App() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         student_id: studentId,
+        teacher_id: currentUser.id,
         type: scoreType,
         subject,
         topic,
@@ -569,6 +621,22 @@ function App() {
                   <option value="student">Student (Personal Learning Portal)</option>
                 </select>
               </label>
+              {authRole === 'teacher' && (
+                <label>
+                  Subject Taught:
+                  <select value={authSubject} onChange={(e) => setAuthSubject(e.target.value)}>
+                    <option value="Physics">Physics</option>
+                    <option value="Chemistry">Chemistry</option>
+                    <option value="Mathematics">Mathematics</option>
+                    <option value="Biology">Biology</option>
+                    <option value="English">English</option>
+                    <option value="Economics">Economics</option>
+                    <option value="Geography">Geography</option>
+                    <option value="Agricultural Science">Agricultural Science</option>
+                    <option value="Civic Education">Civic Education</option>
+                  </select>
+                </label>
+              )}
               {authRole === 'student' && (
                 <label>
                   Access Code (provided by your teacher):
@@ -710,6 +778,11 @@ function App() {
           <span style={{ fontWeight: '600', fontSize: '14px', color: '#1e293b' }}>
             {currentUser.name}
           </span>
+          {currentUser.role === 'teacher' && (
+            <span style={{ fontSize: '12px', background: '#e0f2fe', color: '#0369a1', padding: '3px 8px', borderRadius: '12px', fontWeight: 'bold' }}>
+              📚 {currentUser.subject || 'Physics'}
+            </span>
+          )}
 
           {currentUser.role === 'teacher' && (
             <button
@@ -1106,16 +1179,34 @@ function App() {
                         </code>
                       </td>
                       <td>
-                        <button
-                          onClick={() => {
-                            setProfileStudentId(s.id)
-                            setActiveTab('profiles')
-                          }}
-                          className="btn-secondary"
-                          style={{ padding: '6px 12px', fontSize: '12px' }}
-                        >
-                          View Profile & Performance →
-                        </button>
+                        <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                          <button
+                            onClick={() => {
+                              setProfileStudentId(s.id)
+                              setActiveTab('profiles')
+                            }}
+                            className="btn-secondary"
+                            style={{ padding: '6px 12px', fontSize: '12px' }}
+                          >
+                            View Profile & Performance →
+                          </button>
+                          <button
+                            onClick={() => handleRemoveStudent(s)}
+                            style={{
+                              padding: '6px 10px',
+                              fontSize: '12px',
+                              fontWeight: '600',
+                              color: '#dc2626',
+                              background: '#fef2f2',
+                              border: '1px solid #fecaca',
+                              borderRadius: '6px',
+                              cursor: 'pointer',
+                            }}
+                            title="Remove student from this classroom"
+                          >
+                            🗑️ Remove
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   ))}
@@ -1226,13 +1317,20 @@ function App() {
                   <h3 style={{ margin: 0, fontSize: '20px' }}>
                     {formatStudentLabel(profile.student?.name, profile.student?.class_name)}
                   </h3>
-                  <div style={{ fontSize: '13px', color: '#64748b', marginTop: '4px' }}>
-                    Access Code: <code style={{ fontWeight: 'bold' }}>{profile.student?.access_code}</code>
+                  <div style={{ display: 'flex', gap: '10px', alignItems: 'center', marginTop: '6px', flexWrap: 'wrap' }}>
+                    <span style={{ fontSize: '13px', color: '#64748b' }}>
+                      Access Code: <code style={{ fontWeight: 'bold' }}>{profile.student?.access_code}</code>
+                    </span>
+                    <span style={{ padding: '3px 10px', background: '#eff6ff', color: '#1d4ed8', border: '1px solid #bfdbfe', borderRadius: '12px', fontSize: '12px', fontWeight: 'bold' }}>
+                      📚 {currentUser.subject || 'Physics'} Record
+                    </span>
                   </div>
                 </div>
                 {profile.scores?.length > 0 && (
                   <div style={{ textAlign: 'right' }}>
-                    <span style={{ fontSize: '11px', color: '#64748b', fontWeight: 'bold', textTransform: 'uppercase' }}>COMPOSITE MASTERY</span>
+                    <span style={{ fontSize: '11px', color: '#64748b', fontWeight: 'bold', textTransform: 'uppercase' }}>
+                      {currentUser.subject || 'Physics'} COMPOSITE MASTERY
+                    </span>
                     <div style={{ fontSize: '28px', fontWeight: '800', color: '#1e40af' }}>
                       {calculateComposite(profile.scores)}%
                     </div>
@@ -1241,7 +1339,14 @@ function App() {
               </div>
 
               {!profile.scores || profile.scores.length === 0 ? (
-                <p style={{ marginTop: '20px', color: '#64748b' }}>No assessment scores on record for this student yet.</p>
+                <div style={{ marginTop: '20px', padding: '24px', background: '#f8fafc', borderRadius: '8px', border: '1px dashed #cbd5e1', textAlign: 'center' }}>
+                  <p style={{ margin: '0 0 6px', color: '#334155', fontWeight: '600', fontSize: '15px' }}>
+                    No {currentUser.subject || 'Physics'} assessments on record for this student yet.
+                  </p>
+                  <p style={{ margin: 0, color: '#64748b', fontSize: '13px' }}>
+                    Use the "Record Assessment" tab to grade exams, quizzes, assignments, or participation in {currentUser.subject || 'Physics'}.
+                  </p>
+                </div>
               ) : (
                 <table style={{ marginTop: '20px' }}>
                   <thead>
@@ -2052,6 +2157,25 @@ function App() {
                   placeholder="name@school.edu"
                   required
                 />
+              </label>
+
+              <label>
+                Subject Taught:
+                <select
+                  value={editTeacherSubject}
+                  onChange={(e) => setEditTeacherSubject(e.target.value)}
+                  style={{ width: '100%' }}
+                >
+                  <option value="Physics">Physics</option>
+                  <option value="Chemistry">Chemistry</option>
+                  <option value="Mathematics">Mathematics</option>
+                  <option value="Biology">Biology</option>
+                  <option value="English">English</option>
+                  <option value="Economics">Economics</option>
+                  <option value="Geography">Geography</option>
+                  <option value="Agricultural Science">Agricultural Science</option>
+                  <option value="Civic Education">Civic Education</option>
+                </select>
               </label>
 
               <label>
