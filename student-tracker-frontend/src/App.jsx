@@ -12,7 +12,9 @@ function App() {
   const [authPassword, setAuthPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
   const [authRole, setAuthRole] = useState('teacher')
-  const [authSubject, setAuthSubject] = useState('Physics')
+  const [authSubject, setAuthSubject] = useState('Chemistry')
+  const [loginRole, setLoginRole] = useState('teacher')
+  const [loginSubject, setLoginSubject] = useState('Chemistry')
   const [accessCode, setAccessCode] = useState('')
   const [authError, setAuthError] = useState('')
   const [authSuccess, setAuthSuccess] = useState('')
@@ -266,13 +268,26 @@ function App() {
     fetch(`${API_URL}/api/login`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email: authEmail, password: authPassword }),
+      body: JSON.stringify({
+        email: authEmail,
+        password: authPassword,
+        role: loginRole,
+        subject: loginRole === 'teacher' ? loginSubject : null,
+      }),
     })
       .then(async (res) => {
         const data = await res.json()
         if (!res.ok) throw new Error(data.error || 'Login failed')
-        setCurrentUser(data)
-        setActiveTab(data.role === 'teacher' ? 'analytics' : 'student_dashboard')
+        const activeUser = {
+          ...data,
+          subject: (loginRole === 'teacher' ? (loginSubject || data.subject) : data.subject) || '',
+        }
+        setCurrentUser(activeUser)
+        if (activeUser.subject) {
+          setSubject(activeUser.subject)
+          setEditTeacherSubject(activeUser.subject)
+        }
+        setActiveTab(activeUser.role === 'teacher' ? 'analytics' : 'student_dashboard')
       })
       .catch((err) => setAuthError(err.message))
   }
@@ -566,6 +581,31 @@ function App() {
                 />
               </label>
 
+              <label>
+                I am signing in as:
+                <select value={loginRole} onChange={(e) => setLoginRole(e.target.value)}>
+                  <option value="teacher">Teacher (Classroom Analytics Cockpit)</option>
+                  <option value="student">Student (Personal Learning Portal)</option>
+                </select>
+              </label>
+
+              {loginRole === 'teacher' && (
+                <label>
+                  Subject Taught (Subject you are taking):
+                  <select value={loginSubject} onChange={(e) => setLoginSubject(e.target.value)}>
+                    <option value="Chemistry">Chemistry</option>
+                    <option value="Physics">Physics</option>
+                    <option value="Mathematics">Mathematics</option>
+                    <option value="Biology">Biology</option>
+                    <option value="English">English</option>
+                    <option value="Economics">Economics</option>
+                    <option value="Geography">Geography</option>
+                    <option value="Agricultural Science">Agricultural Science</option>
+                    <option value="Civic Education">Civic Education</option>
+                  </select>
+                </label>
+              )}
+
               <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
                 <button
                   type="button"
@@ -739,16 +779,33 @@ function App() {
     )
   }
 
-  // Extract distinct registered subjects for student's assessment history tabs
-  const studentRegisteredSubjects = profile?.scores
-    ? ['All', ...new Set(profile.scores.map((s) => s.subject).filter(Boolean))]
-    : ['All']
+  // Extract distinct registered subjects for student's assessment history tabs (strictly actual subjects, sorted English #1, Math #2)
+  const rawStudentSubjects = profile?.scores
+    ? [...new Set(profile.scores.map((s) => s.subject).filter(Boolean))]
+    : []
 
-  // Filtered scores in student assessment history tab
-  const filteredHistoryScores = profile?.scores
-    ? selectedSubjectHistory === 'All'
-      ? profile.scores
-      : profile.scores.filter((s) => (s.subject || '').toLowerCase() === selectedSubjectHistory.toLowerCase())
+  // Ensure English #1, Math #2, followed by other subjects
+  const studentRegisteredSubjects = [...rawStudentSubjects].sort((a, b) => {
+    const isEngA = (a || '').toLowerCase().includes('english')
+    const isEngB = (b || '').toLowerCase().includes('english')
+    if (isEngA && !isEngB) return -1
+    if (!isEngA && isEngB) return 1
+    const isMathA = (a || '').toLowerCase().includes('math')
+    const isMathB = (b || '').toLowerCase().includes('math')
+    if (isMathA && !isMathB) return -1
+    if (!isMathA && isMathB) return 1
+    return a.localeCompare(b)
+  })
+
+  // Selected subject for history view (defaults to first available enrolled subject)
+  const activeHistorySubject =
+    selectedSubjectHistory && studentRegisteredSubjects.includes(selectedSubjectHistory)
+      ? selectedSubjectHistory
+      : studentRegisteredSubjects[0] || ''
+
+  // Filtered scores in student assessment history tab strictly for the chosen subject
+  const filteredHistoryScores = profile?.scores && activeHistorySubject
+    ? profile.scores.filter((s) => (s.subject || '').toLowerCase() === activeHistorySubject.toLowerCase())
     : []
 
   // --- Main Application View ---
@@ -1835,88 +1892,111 @@ function App() {
       {/* ============================================================== */}
       {currentUser.role === 'student' && activeTab === 'my_scores' && (
         <div className="data-card">
-          <h3>My Assessment History</h3>
+          <h3>My Assessment History & AI Diagnostics</h3>
           <p className="data-card-subtitle">
-            Filter your scores by registered subject and generate personalized AI diagnostic assessments.
+            Select a subject to inspect your learning history and generate personalized AI diagnostic assessments.
           </p>
 
-          {/* Subject Filter Tabs */}
-          {studentRegisteredSubjects.length > 1 && (
-            <div className="subject-tabs">
-              {studentRegisteredSubjects.map((sub) => (
-                <button
-                  key={sub}
-                  onClick={() => {
-                    setSelectedSubjectHistory(sub)
-                    setHistoryRecommendation('')
-                  }}
-                  className={`subject-tab-btn ${selectedSubjectHistory === sub ? 'active' : ''}`}
-                >
-                  {sub === 'All' ? 'All Subjects' : sub}
-                </button>
-              ))}
-            </div>
-          )}
-
-          {/* Scores Table */}
-          {filteredHistoryScores.length === 0 ? (
-            <p style={{ color: '#64748b' }}>No assessment scores on record for {selectedSubjectHistory === 'All' ? 'any subject' : selectedSubjectHistory}.</p>
+          {studentRegisteredSubjects.length === 0 ? (
+            <p style={{ color: '#64748b' }}>No assessment scores on record yet. Once your teachers grade tests, your subject histories will appear here.</p>
           ) : (
             <>
-              <table>
-                <thead>
-                  <tr>
-                    <th>Type</th>
-                    <th>Subject</th>
-                    <th>Topic</th>
-                    <th>Score</th>
-                    <th>Percentage</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filteredHistoryScores.map((s) => {
-                    const pct = s.max_score > 0 ? ((s.score / s.max_score) * 100).toFixed(1) : 0
+              {/* Subject Tabs */}
+              <div style={{ marginBottom: '18px' }}>
+                <div style={{ fontSize: '12px', fontWeight: 'bold', color: '#64748b', textTransform: 'uppercase', marginBottom: '8px' }}>
+                  Select Subject to View:
+                </div>
+                <div className="subject-tabs">
+                  {studentRegisteredSubjects.map((sub) => {
+                    const count = profile?.scores?.filter((s) => (s.subject || '').toLowerCase() === sub.toLowerCase()).length || 0
                     return (
-                      <tr key={s.id}>
-                        <td><span style={{ textTransform: 'capitalize' }}>{s.type}</span></td>
-                        <td>{s.subject}</td>
-                        <td><strong>{s.topic}</strong></td>
-                        <td>{s.score} / {s.max_score}</td>
-                        <td>
-                          <span style={{ fontWeight: 'bold', color: pct >= 70 ? '#059669' : pct >= 50 ? '#d97706' : '#dc2626' }}>
-                            {pct}%
-                          </span>
-                        </td>
-                      </tr>
+                      <button
+                        key={sub}
+                        onClick={() => {
+                          setSelectedSubjectHistory(sub)
+                          setHistoryRecommendation('')
+                        }}
+                        className={`subject-tab-btn ${activeHistorySubject === sub ? 'active' : ''}`}
+                      >
+                        {sub === 'Chemistry' ? '🧪 Chemistry' : sub === 'Physic' || sub === 'Physics' ? '⚛️ Physics' : sub === 'Mathematics' ? '📐 Mathematics' : sub === 'Biology' ? '🧬 Biology' : sub === 'English' ? '📖 English' : sub} ({count})
+                      </button>
                     )
                   })}
-                </tbody>
-              </table>
+                </div>
+              </div>
 
-              {/* Subject-Specific AI Assessment Generator for Students */}
-              <div style={{ marginTop: '26px', padding: '20px', background: '#f8fafc', borderRadius: '12px', border: '1px solid #e2e8f0' }}>
+              {/* Subject Assessment Table */}
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px', flexWrap: 'wrap', gap: '8px' }}>
+                <h4 style={{ margin: 0, fontSize: '16px', color: '#0f172a' }}>
+                  📋 {activeHistorySubject} Assessment Records ({filteredHistoryScores.length})
+                </h4>
+                {filteredHistoryScores.length > 0 && (
+                  <span style={{ fontSize: '13px', color: '#1e40af', fontWeight: 'bold' }}>
+                    Subject Mastery: {calculateComposite(filteredHistoryScores)}%
+                  </span>
+                )}
+              </div>
+
+              {filteredHistoryScores.length === 0 ? (
+                <div style={{ padding: '24px', background: '#f8fafc', borderRadius: '8px', border: '1px dashed #cbd5e1', textAlign: 'center' }}>
+                  <p style={{ margin: 0, color: '#64748b' }}>No assessment scores recorded for {activeHistorySubject} yet.</p>
+                </div>
+              ) : (
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Type</th>
+                      <th>Subject</th>
+                      <th>Topic</th>
+                      <th>Score</th>
+                      <th>Percentage</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredHistoryScores.map((s) => {
+                      const pct = s.max_score > 0 ? ((s.score / s.max_score) * 100).toFixed(1) : 0
+                      return (
+                        <tr key={s.id}>
+                          <td><span style={{ textTransform: 'capitalize' }}>{s.type}</span></td>
+                          <td>{s.subject}</td>
+                          <td><strong>{s.topic}</strong></td>
+                          <td>{s.score} / {s.max_score}</td>
+                          <td>
+                            <span style={{ fontWeight: 'bold', color: pct >= 70 ? '#059669' : pct >= 50 ? '#d97706' : '#dc2626' }}>
+                              {pct}%
+                            </span>
+                          </td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              )}
+
+              {/* AI Diagnostic Assessment Card strictly for this selected subject */}
+              <div style={{ marginTop: '24px', padding: '20px', background: '#f0f9ff', borderRadius: '12px', border: '1px solid #bae6fd' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
                   <div>
-                    <h4 style={{ margin: '0 0 4px', color: '#1e40af', fontSize: '16px' }}>
-                      ⚡ AI Diagnostic Assessment for {selectedSubjectHistory === 'All' ? 'All Subjects' : selectedSubjectHistory}
+                    <h4 style={{ margin: '0 0 4px', color: '#0369a1', fontSize: '16px' }}>
+                      ⚡ AI Diagnostic Assessment for {activeHistorySubject}
                     </h4>
-                    <p style={{ margin: 0, fontSize: '13px', color: '#64748b' }}>
-                      Get a personalized evaluation and strategic study recommendations based on your {selectedSubjectHistory === 'All' ? 'overall' : selectedSubjectHistory} scores.
+                    <p style={{ margin: 0, fontSize: '13px', color: '#0284c7' }}>
+                      Generate a personalized diagnostic evaluation and strategic study recommendations based strictly on your {activeHistorySubject} scores.
                     </p>
                   </div>
                   <button
-                    onClick={() => fetchStudentSubjectRecommendation(currentUser.student_id, selectedSubjectHistory)}
-                    disabled={loadingHistoryRec}
+                    onClick={() => fetchStudentSubjectRecommendation(currentUser.student_id, activeHistorySubject)}
+                    disabled={loadingHistoryRec || filteredHistoryScores.length === 0}
                     className="btn-primary"
                   >
-                    {loadingHistoryRec ? 'Analyzing Performance...' : `Generate AI Assessment`}
+                    {loadingHistoryRec ? 'Analyzing Performance...' : `Generate ${activeHistorySubject} AI Assessment`}
                   </button>
                 </div>
 
-                {loadingHistoryRec && <p style={{ marginTop: '14px', color: '#64748b' }}>Analyzing your performance data...</p>}
+                {loadingHistoryRec && <p style={{ marginTop: '14px', color: '#0369a1' }}>Analyzing your {activeHistorySubject} performance data...</p>}
 
                 {historyRecommendation && (
-                  <div style={{ marginTop: '16px', padding: '16px 20px', background: 'white', border: '1px solid #cbd5e1', borderRadius: '10px', lineHeight: 1.6, whiteSpace: 'pre-wrap', fontSize: '14px', color: '#1e293b' }}>
+                  <div style={{ marginTop: '16px', padding: '16px 20px', background: 'white', border: '1px solid #7dd3fc', borderRadius: '10px', lineHeight: 1.6, whiteSpace: 'pre-wrap', fontSize: '14px', color: '#1e293b' }}>
                     {historyRecommendation}
                   </div>
                 )}

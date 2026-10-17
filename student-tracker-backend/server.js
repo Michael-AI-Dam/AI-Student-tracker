@@ -72,6 +72,29 @@ function subjectsMatch(sub1, sub2) {
   return normalizeSubject(sub1) === normalizeSubject(sub2);
 }
 
+function normalizeClassName(className) {
+  if (!className) return '';
+  const c = String(className).toLowerCase().replace(/[\s\-_/()]/g, '');
+  if (c.includes('sss1') || c.includes('grade10') || c.includes('ss1') || c === '10' || c === 'year10') {
+    return 'SSS 1';
+  }
+  if (c.includes('sss2') || c.includes('grade11') || c.includes('ss2') || c === '11' || c === 'year11') {
+    return 'SSS 2';
+  }
+  if (c.includes('sss3') || c.includes('grade12') || c.includes('ss3') || c === '12' || c === 'year12') {
+    return 'SSS 3';
+  }
+  return className.trim();
+}
+
+function areClassesEquivalent(c1, c2) {
+  if (!c1 || !c2) return true;
+  const n1 = normalizeClassName(c1);
+  const n2 = normalizeClassName(c2);
+  if (n1 === n2) return true;
+  return n1.toLowerCase() === n2.toLowerCase();
+}
+
 // Middleware to ensure DB is initialized before executing query routes
 function requireDb(req, res, next) {
   const db = getDb();
@@ -212,7 +235,7 @@ app.post('/api/signup', requireDb, async (req, res) => {
 app.post('/api/login', requireDb, async (req, res) => {
   try {
     const db = req.db;
-    const { email, password } = req.body;
+    const { email, password, subject } = req.body;
 
     if (!email || !password) {
       return res.status(400).json({ error: 'Email and password are required.' });
@@ -233,12 +256,28 @@ app.post('/api/login', requireDb, async (req, res) => {
       return res.status(401).json({ error: 'Invalid email or password.' });
     }
 
+    let activeSubject = user.subject || '';
+
+    // If teacher signs in and specified subject, update user subject in DB
+    if (user.role === 'teacher') {
+      if (subject && subject.trim()) {
+        activeSubject = subject.trim();
+        await db.collection('users').doc(user.id).update({
+          subject: activeSubject,
+          updatedAt: new Date().toISOString(),
+        });
+      } else if (!activeSubject) {
+        if (user.id === 'vXbo2eCYo1LepXt7bUNa') activeSubject = 'Chemistry';
+        else if (user.id === 'QuF7Hq7aC0euzP2DEKaW') activeSubject = 'Physics';
+      }
+    }
+
     res.json({
       id: user.id,
       name: user.name,
       email: user.email,
       role: user.role,
-      subject: user.subject || '',
+      subject: activeSubject,
       student_id: user.student_id || null,
     });
   } catch (err) {
@@ -408,38 +447,42 @@ app.post('/api/students', requireDb, async (req, res) => {
 
     const trimmedName = name.trim();
     const trimmedClass = (class_name || '').trim();
+    const standardClass = normalizeClassName(trimmedClass);
 
-    // Check if a student with the same name already exists in the school database
+    // Check if a student with the same name already exists in the school database with equivalent class
     const allStudentsSnapshot = await db.collection('students').get();
     const existingStudentDoc = allStudentsSnapshot.docs.find((d) => {
       const data = d.data();
-      return (
-        data.name.trim().toLowerCase() === trimmedName.toLowerCase()
-      );
+      const sameName = data.name.trim().toLowerCase() === trimmedName.toLowerCase();
+      const sameClass = areClassesEquivalent(data.class_name, trimmedClass);
+      return sameName && sameClass;
     });
 
     if (existingStudentDoc) {
-      // Re-use this student and their existing access code so students don't need a new signup
+      // Re-use this student and their existing permanent access code so students don't need a new signup
       const data = existingStudentDoc.data();
       let currentTeachers = Array.isArray(data.teacher_ids)
         ? data.teacher_ids.map(String)
         : [String(data.teacher_id)].filter(Boolean);
 
+      const updates = {};
       if (!currentTeachers.includes(String(teacher_id))) {
         currentTeachers.push(String(teacher_id));
-        const updates = { teacher_ids: currentTeachers };
-        if (trimmedClass && (!data.class_name || data.class_name === 'General')) {
-          updates.class_name = trimmedClass;
-        }
+        updates.teacher_ids = currentTeachers;
+      }
+      if (standardClass && (!data.class_name || data.class_name === 'General')) {
+        updates.class_name = standardClass;
+      }
+      if (Object.keys(updates).length > 0) {
         await db.collection('students').doc(existingStudentDoc.id).update(updates);
       }
 
       return res.json({
         id: existingStudentDoc.id,
         name: data.name,
-        class_name: data.class_name,
+        class_name: updates.class_name || data.class_name,
         access_code: data.access_code,
-        message: 'Linked to existing student record and access code.',
+        message: `Student already enrolled! Linked to permanent student record with Access Code: ${data.access_code}`,
       });
     }
 
@@ -447,7 +490,7 @@ app.post('/api/students', requireDb, async (req, res) => {
 
     const newStudentRef = await db.collection('students').add({
       name: trimmedName,
-      class_name: trimmedClass,
+      class_name: standardClass || trimmedClass || 'General',
       teacher_id: String(teacher_id),
       teacher_ids: [String(teacher_id)],
       access_code,
@@ -457,7 +500,7 @@ app.post('/api/students', requireDb, async (req, res) => {
     res.json({
       id: newStudentRef.id,
       name: trimmedName,
-      class_name: trimmedClass,
+      class_name: standardClass || trimmedClass || 'General',
       teacher_id: String(teacher_id),
       access_code,
     });
@@ -591,7 +634,9 @@ app.get('/api/students/:id/profile', requireDb, async (req, res) => {
         if (myScore) teacherSubject = myScore.subject;
       }
 
-      // Special case for Mrs Suzana: default to Physics if not set
+      if (String(teacher_id) === 'vXbo2eCYo1LepXt7bUNa' && !teacherSubject) {
+        teacherSubject = 'Chemistry';
+      }
       if (String(teacher_id) === 'QuF7Hq7aC0euzP2DEKaW' && !teacherSubject) {
         teacherSubject = 'Physics';
       }
@@ -738,6 +783,9 @@ app.get('/api/teachers/:teacherId/analytics', requireDb, async (req, res) => {
     const teacherDoc = await db.collection('users').doc(String(teacherId)).get();
     const teacherData = teacherDoc.exists ? teacherDoc.data() : {};
     let teacherSubject = teacherData.subject || '';
+    if (String(teacherId) === 'vXbo2eCYo1LepXt7bUNa' && !teacherSubject) {
+      teacherSubject = 'Chemistry';
+    }
     if (String(teacherId) === 'QuF7Hq7aC0euzP2DEKaW' && !teacherSubject) {
       teacherSubject = 'Physics';
     }
@@ -779,32 +827,34 @@ app.get('/api/teachers/:teacherId/analytics', requireDb, async (req, res) => {
     students.forEach((student) => {
       const scores = scoresByStudent[student.id] || [];
       const composite = calculateCompositeScore(scores);
+
+      // Only classify students who have scores recorded in this subject
       if (scores.length > 0) {
         totalCompositeSum += composite;
         studentsWithScoresCount++;
-      }
 
-      // Mastery categories
-      if (composite >= 80) distribution.advanced++;
-      else if (composite >= 65) distribution.proficient++;
-      else if (composite >= 50) distribution.basic++;
-      else distribution.needsHelp++;
+        // Mastery categories
+        if (composite >= 80) distribution.advanced++;
+        else if (composite >= 65) distribution.proficient++;
+        else if (composite >= 50) distribution.basic++;
+        else distribution.needsHelp++;
 
-      // Identify weak topics for this student
-      const weakTopics = scores
-        .filter((s) => s.max_score > 0 && (s.score / s.max_score) < 0.6)
-        .map((s) => s.topic)
-        .filter(Boolean);
+        // Identify weak topics for this student
+        const weakTopics = scores
+          .filter((s) => s.max_score > 0 && (s.score / s.max_score) < 0.6)
+          .map((s) => s.topic)
+          .filter(Boolean);
 
-      if (composite < 60 || weakTopics.length >= 2) {
-        atRiskStudents.push({
-          id: student.id,
-          name: student.name,
-          class_name: student.class_name,
-          compositeScore: composite,
-          scoresCount: scores.length,
-          weakTopics: [...new Set(weakTopics)],
-        });
+        if (composite < 60 || weakTopics.length >= 2) {
+          atRiskStudents.push({
+            id: student.id,
+            name: student.name,
+            class_name: student.class_name,
+            compositeScore: composite,
+            scoresCount: scores.length,
+            weakTopics: [...new Set(weakTopics)],
+          });
+        }
       }
 
       studentsSummary.push({
