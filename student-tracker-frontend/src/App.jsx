@@ -86,6 +86,38 @@ function App() {
     return className ? `${name} (${className})` : name
   }
 
+  // Helper: Get subject assessments formatted with assessment type and exact percentage from history
+  const getSubjectAssessments = (sub) => {
+    if (sub.assessments && sub.assessments.length > 0) return sub.assessments
+    if (profile?.scores) {
+      return profile.scores
+        .filter((s) => (s.subject || '').toLowerCase() === (sub.subject || '').toLowerCase())
+        .map((s) => {
+          const typeKey = (s.type || 'assignment').toLowerCase()
+          const typeLabel =
+            typeKey === 'exam'
+              ? 'Exam'
+              : typeKey === 'test'
+              ? 'Test'
+              : typeKey === 'quiz'
+              ? 'Quiz'
+              : typeKey === 'participation'
+              ? 'Participation'
+              : 'Assignment'
+          const avgPct = s.max_score > 0 ? Number(((s.score / s.max_score) * 100).toFixed(1)) : 0
+          return {
+            id: s.id,
+            type: typeLabel,
+            typeKey,
+            score: s.score,
+            max_score: s.max_score,
+            avgPct,
+          }
+        })
+    }
+    return []
+  }
+
   // Helper: Sorting subjects so English is ALWAYS #1, Mathematics is ALWAYS #2, then others
   const sortSubjectsWithEnglishAndMathFirst = (subjectsList) => {
     if (!Array.isArray(subjectsList)) return []
@@ -469,6 +501,8 @@ function App() {
   const handleAddScore = (e) => {
     e.preventDefault()
     setScoreMessage('')
+    const chosenSubject = currentUser?.subject || subject || 'General'
+    const assessmentTypeLabel = scoreType.charAt(0).toUpperCase() + scoreType.slice(1)
     fetch(`${API_URL}/api/scores`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -476,8 +510,8 @@ function App() {
         student_id: studentId,
         teacher_id: currentUser.id,
         type: scoreType,
-        subject,
-        topic,
+        subject: chosenSubject,
+        topic: assessmentTypeLabel,
         score: Number(scoreVal),
         max_score: Number(maxScoreVal),
       }),
@@ -499,23 +533,31 @@ function App() {
 
   const calculateComposite = (scores) => {
     if (!scores || !Array.isArray(scores) || scores.length === 0) return null
-    const weights = { exam: 0.5, quiz: 0.2, assignment: 0.2, participation: 0.1 }
+    const weights = {
+      exam: 0.4,
+      test: 0.2,
+      quiz: 0.15,
+      assignment: 0.15,
+      participation: 0.1,
+    }
     const byType = {}
 
     scores.forEach((s) => {
-      if (!byType[s.type]) byType[s.type] = { totalScore: 0, totalMax: 0 }
-      byType[s.type].totalScore += Number(s.score) || 0
-      byType[s.type].totalMax += Number(s.max_score) || 0
+      const t = (s.type || 'assignment').toLowerCase()
+      if (!byType[t]) byType[t] = { totalScore: 0, totalMax: 0 }
+      byType[t].totalScore += Number(s.score) || 0
+      byType[t].totalMax += Number(s.max_score) || 0
     })
 
     let weightedSum = 0
     let weightUsed = 0
 
     Object.entries(byType).forEach(([t, { totalScore, totalMax }]) => {
-      if (totalMax > 0 && weights[t]) {
+      const w = weights[t] || 0.15
+      if (totalMax > 0 && w) {
         const pct = (totalScore / totalMax) * 100
-        weightedSum += pct * weights[t]
-        weightUsed += weights[t]
+        weightedSum += pct * w
+        weightUsed += w
       }
     })
 
@@ -1078,85 +1120,98 @@ function App() {
                 </div>
               )}
 
-              {/* Class-Wide Topic Difficulty Matrix Broken Down by Assessment Category */}
+              {/* Class-Wide Assessment Breakdown by Assessment Type */}
               <div className="data-card">
-                <h3>Class-Wide Topic Difficulty Matrix</h3>
+                <h3>Class-Wide Assessment Performance</h3>
                 <p className="data-card-subtitle">
-                  Ranked by difficulty. Submissions broken down across Exam, Quiz, Assignment, and Participation.
+                  Class performance and submission records by assessment type for {currentUser.subject || 'your subject'}.
                 </p>
-                {teacherAnalytics.topicPerformance.length === 0 ? (
-                  <p style={{ color: '#64748b' }}>No topic assessments recorded yet.</p>
-                ) : (
-                  <table>
-                    <thead>
-                      <tr>
-                        <th>Topic</th>
-                        <th>Subject</th>
-                        <th style={{ textAlign: 'center' }}>Exam</th>
-                        <th style={{ textAlign: 'center' }}>Quiz</th>
-                        <th style={{ textAlign: 'center' }}>Assignment</th>
-                        <th style={{ textAlign: 'center' }}>Participation</th>
-                        <th>Class Average</th>
-                        <th>Status</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {teacherAnalytics.topicPerformance.map((t, idx) => (
-                        <tr key={idx}>
-                          <td><strong>{t.topic}</strong></td>
-                          <td>{t.subject}</td>
-                          <td style={{ textAlign: 'center' }}>
-                            {t.byCategory?.exam > 0 ? (
-                              <span style={{ fontWeight: '600', color: '#1e40af' }}>{t.byCategory.exam}</span>
-                            ) : (
-                              <span style={{ color: '#94a3b8' }}>—</span>
-                            )}
-                          </td>
-                          <td style={{ textAlign: 'center' }}>
-                            {t.byCategory?.quiz > 0 ? (
-                              <span style={{ fontWeight: '600', color: '#1e40af' }}>{t.byCategory.quiz}</span>
-                            ) : (
-                              <span style={{ color: '#94a3b8' }}>—</span>
-                            )}
-                          </td>
-                          <td style={{ textAlign: 'center' }}>
-                            {t.byCategory?.assignment > 0 ? (
-                              <span style={{ fontWeight: '600', color: '#1e40af' }}>{t.byCategory.assignment}</span>
-                            ) : (
-                              <span style={{ color: '#94a3b8' }}>—</span>
-                            )}
-                          </td>
-                          <td style={{ textAlign: 'center' }}>
-                            {t.byCategory?.participation > 0 ? (
-                              <span style={{ fontWeight: '600', color: '#1e40af' }}>{t.byCategory.participation}</span>
-                            ) : (
-                              <span style={{ color: '#94a3b8' }}>—</span>
-                            )}
-                          </td>
-                          <td>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                              <span style={{ minWidth: '40px', fontWeight: '600' }}>{t.avgPct}%</span>
-                              <div style={{ flex: 1, height: '6px', background: '#e2e8f0', borderRadius: '3px', overflow: 'hidden' }}>
-                                <div
-                                  style={{
-                                    height: '100%',
-                                    width: `${t.avgPct}%`,
-                                    background: t.avgPct < 55 ? '#dc2626' : t.avgPct < 75 ? '#2563eb' : '#059669'
-                                  }}
-                                ></div>
-                              </div>
-                            </div>
-                          </td>
-                          <td>
-                            <span className={`badge ${t.status === 'Needs Review' ? 'badge-review' : t.status === 'In Progress' ? 'badge-progress' : 'badge-mastered'}`}>
-                              {t.status}
-                            </span>
-                          </td>
+                {(() => {
+                  const defaultTypes = [
+                    { typeKey: 'assignment', type: 'Assignment', icon: '📑' },
+                    { typeKey: 'quiz', type: 'Quiz', icon: '❓' },
+                    { typeKey: 'test', type: 'Test', icon: '🧪' },
+                    { typeKey: 'participation', type: 'Participation', icon: '🙋' },
+                    { typeKey: 'exam', type: 'Exam', icon: '📝' },
+                  ]
+
+                  const rows = defaultTypes.map((item) => {
+                    const match = teacherAnalytics.assessmentTypePerformance?.find(
+                      (p) => p.typeKey === item.typeKey
+                    )
+                    if (match) {
+                      return {
+                        ...item,
+                        count: match.count,
+                        avgPct: match.avgPct,
+                        status: match.status,
+                      }
+                    }
+                    return {
+                      ...item,
+                      count: 0,
+                      avgPct: 0,
+                      status: '—',
+                    }
+                  })
+
+                  return (
+                    <table>
+                      <thead>
+                        <tr>
+                          <th>ASSESSMENT TYPE</th>
+                          <th style={{ textAlign: 'center' }}>NO OF STUDENTS RECORD</th>
+                          <th>CLASS AVERAGE</th>
+                          <th>STATUS</th>
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                )}
+                      </thead>
+                      <tbody>
+                        {rows.map((row) => (
+                          <tr key={row.typeKey}>
+                            <td>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                <span style={{ fontSize: '18px' }}>{row.icon}</span>
+                                <strong>{row.type}</strong>
+                              </div>
+                            </td>
+                            <td style={{ textAlign: 'center' }}>
+                              <span style={{ fontWeight: '600', fontSize: '14px', color: row.count > 0 ? '#1e40af' : '#94a3b8' }}>
+                                {row.count}
+                              </span>
+                            </td>
+                            <td>
+                              {row.count > 0 ? (
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                  <span style={{ minWidth: '45px', fontWeight: '600' }}>{row.avgPct}%</span>
+                                  <div style={{ flex: 1, height: '6px', background: '#e2e8f0', borderRadius: '3px', overflow: 'hidden' }}>
+                                    <div
+                                      style={{
+                                        height: '100%',
+                                        width: `${Math.min(100, row.avgPct)}%`,
+                                        background: row.avgPct < 55 ? '#dc2626' : row.avgPct < 75 ? '#2563eb' : '#059669'
+                                      }}
+                                    ></div>
+                                  </div>
+                                </div>
+                              ) : (
+                                <span style={{ color: '#94a3b8' }}>—</span>
+                              )}
+                            </td>
+                            <td>
+                              {row.count > 0 ? (
+                                <span className={`badge ${row.status === 'Needs Review' ? 'badge-review' : row.status === 'In Progress' ? 'badge-progress' : 'badge-mastered'}`}>
+                                  {row.status}
+                                </span>
+                              ) : (
+                                <span style={{ color: '#94a3b8' }}>—</span>
+                              )}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  )
+                })()}
               </div>
             </>
           ) : (
@@ -1302,27 +1357,22 @@ function App() {
                 <label>
                   Assessment Type:
                   <select value={scoreType} onChange={(e) => setScoreType(e.target.value)}>
-                    <option value="exam">Exam (50% Weight)</option>
-                    <option value="quiz">Quiz (20% Weight)</option>
-                    <option value="assignment">Assignment (20% Weight)</option>
+                    <option value="assignment">Assignment (15% Weight)</option>
+                    <option value="quiz">Quiz (15% Weight)</option>
+                    <option value="test">Test (20% Weight)</option>
                     <option value="participation">Participation (10% Weight)</option>
+                    <option value="exam">Exam (40% Weight)</option>
                   </select>
                 </label>
                 <label>
                   Subject:
-                  <input value={subject} onChange={(e) => setSubject(e.target.value)} placeholder="e.g. Chemistry" required />
+                  <input
+                    value={currentUser.subject || subject}
+                    readOnly
+                    style={{ background: '#f1f5f9', cursor: 'not-allowed', color: '#334155', fontWeight: '600' }}
+                  />
                 </label>
               </div>
-
-              <label>
-                Specific Topic / Unit:
-                <input
-                  value={topic}
-                  onChange={(e) => setTopic(e.target.value)}
-                  placeholder="e.g. Stoichiometry, Cellular Respiration"
-                  required
-                />
-              </label>
 
               <div className="form-grid">
                 <label>
@@ -1408,25 +1458,33 @@ function App() {
                 <table style={{ marginTop: '20px' }}>
                   <thead>
                     <tr>
-                      <th>Type</th>
+                      <th>Assessment Type</th>
                       <th>Subject</th>
-                      <th>Topic</th>
                       <th>Score</th>
                       <th>Percentage</th>
+                      <th>Status</th>
                     </tr>
                   </thead>
                   <tbody>
                     {profile.scores.map((s) => {
-                      const pct = s.max_score > 0 ? ((s.score / s.max_score) * 100).toFixed(1) : 0
+                      const pct = s.max_score > 0 ? Number(((s.score / s.max_score) * 100).toFixed(1)) : 0
                       return (
                         <tr key={s.id}>
-                          <td><span style={{ textTransform: 'capitalize' }}>{s.type}</span></td>
+                          <td>
+                            <strong>
+                              {s.type ? s.type.charAt(0).toUpperCase() + s.type.slice(1) : 'Assessment'}
+                            </strong>
+                          </td>
                           <td>{s.subject}</td>
-                          <td><strong>{s.topic}</strong></td>
                           <td>{s.score} / {s.max_score}</td>
                           <td>
                             <span style={{ fontWeight: 'bold', color: pct >= 70 ? '#059669' : pct >= 50 ? '#d97706' : '#dc2626' }}>
                               {pct}%
+                            </span>
+                          </td>
+                          <td>
+                            <span className={`badge ${pct < 55 ? 'badge-review' : pct < 75 ? 'badge-progress' : 'badge-mastered'}`}>
+                              {pct >= 75 ? 'Mastered' : pct >= 55 ? 'In Progress' : 'Needs Review'}
                             </span>
                           </td>
                         </tr>
@@ -1490,13 +1548,14 @@ function App() {
                   <h3 style={{ color: '#065f46', display: 'flex', alignItems: 'center', gap: '8px' }}>
                     🌟 My Demonstrated Strengths
                   </h3>
-                  <p className="data-card-subtitle">Subjects where you achieved mastery. Click a subject to view topic breakdown.</p>
+                  <p className="data-card-subtitle">Subjects where you achieved mastery. Click a subject to view assessment performance breakdown.</p>
                   {(!studentAnalytics.subjectStrengths || studentAnalytics.subjectStrengths.length === 0) ? (
                     <p style={{ color: '#64748b', fontSize: '14px' }}>Keep practicing assessments to build subject masteries!</p>
                   ) : (
                     <div>
                       {studentAnalytics.subjectStrengths.map((sub, i) => {
                         const isExpanded = !!expandedStrengthSubjects[sub.subject]
+                        const assessmentList = getSubjectAssessments(sub)
                         return (
                           <div key={i} className="subject-accordion-card">
                             <div
@@ -1506,7 +1565,7 @@ function App() {
                               <div>
                                 <strong style={{ fontSize: '15px', color: '#065f46' }}>{sub.subject}</strong>
                                 <span style={{ fontSize: '12px', color: '#64748b', marginLeft: '8px' }}>
-                                  ({sub.topics?.length || 0} topics {isExpanded ? '▲' : '▼'})
+                                  ({assessmentList.length} {assessmentList.length === 1 ? 'assessment' : 'assessments'} {isExpanded ? '▲' : '▼'})
                                 </span>
                               </div>
                               <span style={{ fontWeight: 'bold', color: '#059669', fontSize: '16px' }}>{sub.avgPct}%</span>
@@ -1514,10 +1573,22 @@ function App() {
 
                             {isExpanded && (
                               <div className="subject-accordion-body">
-                                {sub.topics && sub.topics.map((tp, idx) => (
-                                  <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 0', borderBottom: idx < sub.topics.length - 1 ? '1px solid #e2e8f0' : 'none', fontSize: '13px' }}>
-                                    <span>{tp.topic}</span>
-                                    <span style={{ fontWeight: '600', color: tp.avgPct >= 70 ? '#059669' : '#d97706' }}>{tp.avgPct}%</span>
+                                {assessmentList.map((item, idx) => (
+                                  <div
+                                    key={idx}
+                                    style={{
+                                      display: 'flex',
+                                      justifyContent: 'space-between',
+                                      alignItems: 'center',
+                                      padding: '7px 0',
+                                      borderBottom: idx < assessmentList.length - 1 ? '1px solid #e2e8f0' : 'none',
+                                      fontSize: '13px',
+                                    }}
+                                  >
+                                    <span style={{ fontWeight: '600', color: '#1e293b' }}>{item.type}</span>
+                                    <span style={{ fontWeight: '600', color: item.avgPct >= 70 ? '#059669' : item.avgPct >= 50 ? '#d97706' : '#dc2626' }}>
+                                      {item.avgPct}%
+                                    </span>
                                   </div>
                                 ))}
                               </div>
@@ -1534,13 +1605,14 @@ function App() {
                   <h3 style={{ color: '#b91c1c', display: 'flex', alignItems: 'center', gap: '8px' }}>
                     🎯 Focus & Reinforcement Areas
                   </h3>
-                  <p className="data-card-subtitle">Subjects requiring reinforcement. Click to see weak topics and study guides.</p>
+                  <p className="data-card-subtitle">Subjects requiring reinforcement. Click to see assessment breakdown and study guides.</p>
                   {(!studentAnalytics.subjectWeaknesses || studentAnalytics.subjectWeaknesses.length === 0) ? (
                     <p style={{ color: '#059669', fontSize: '14px' }}>Great job! You have no critical weak subjects below 60%.</p>
                   ) : (
                     <div>
                       {studentAnalytics.subjectWeaknesses.map((sub, i) => {
                         const isExpanded = !!expandedWeakSubjects[sub.subject]
+                        const assessmentList = getSubjectAssessments(sub)
                         return (
                           <div key={i} className="subject-accordion-card">
                             <div
@@ -1550,7 +1622,7 @@ function App() {
                               <div>
                                 <strong style={{ fontSize: '15px', color: '#dc2626' }}>{sub.subject}</strong>
                                 <span style={{ fontSize: '12px', color: '#64748b', marginLeft: '8px' }}>
-                                  ({sub.topics?.length || 0} topics {isExpanded ? '▲' : '▼'})
+                                  ({assessmentList.length} {assessmentList.length === 1 ? 'assessment' : 'assessments'} {isExpanded ? '▲' : '▼'})
                                 </span>
                               </div>
                               <span style={{ fontWeight: 'bold', color: '#dc2626', fontSize: '16px' }}>{sub.avgPct}%</span>
@@ -1558,19 +1630,36 @@ function App() {
 
                             {isExpanded && (
                               <div className="subject-accordion-body">
-                                {sub.topics && sub.topics.map((tp, idx) => (
-                                  <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 0', borderBottom: idx < sub.topics.length - 1 ? '1px solid #e2e8f0' : 'none', fontSize: '13px', flexWrap: 'wrap', gap: '6px' }}>
-                                    <span>{tp.topic} <strong style={{ color: '#dc2626' }}>({tp.avgPct}%)</strong></span>
+                                {assessmentList.map((item, idx) => (
+                                  <div
+                                    key={idx}
+                                    style={{
+                                      display: 'flex',
+                                      justifyContent: 'space-between',
+                                      alignItems: 'center',
+                                      padding: '7px 0',
+                                      borderBottom: idx < assessmentList.length - 1 ? '1px solid #e2e8f0' : 'none',
+                                      fontSize: '13px',
+                                      flexWrap: 'wrap',
+                                      gap: '6px',
+                                    }}
+                                  >
+                                    <span>
+                                      <strong style={{ textTransform: 'capitalize' }}>{item.type}</strong>
+                                      <span style={{ color: item.avgPct < 60 ? '#dc2626' : '#059669', marginLeft: '6px', fontWeight: 'bold' }}>
+                                        ({item.avgPct}%)
+                                      </span>
+                                    </span>
                                     <button
                                       onClick={() => {
-                                        setSelectedTopicForStudy(tp.topic)
-                                        handleGenerateMaterials(tp.topic)
+                                        setSelectedTopicForStudy(sub.subject)
+                                        handleGenerateMaterials(sub.subject)
                                         setActiveTab('study_materials')
                                       }}
                                       className="btn-primary"
                                       style={{ padding: '4px 10px', fontSize: '11px' }}
                                     >
-                                      Study Unit →
+                                      Study {sub.subject} →
                                     </button>
                                   </div>
                                 ))}
@@ -1945,25 +2034,33 @@ function App() {
                 <table>
                   <thead>
                     <tr>
-                      <th>Type</th>
+                      <th>Assessment Type</th>
                       <th>Subject</th>
-                      <th>Topic</th>
                       <th>Score</th>
                       <th>Percentage</th>
+                      <th>Status</th>
                     </tr>
                   </thead>
                   <tbody>
                     {filteredHistoryScores.map((s) => {
-                      const pct = s.max_score > 0 ? ((s.score / s.max_score) * 100).toFixed(1) : 0
+                      const pct = s.max_score > 0 ? Number(((s.score / s.max_score) * 100).toFixed(1)) : 0
                       return (
                         <tr key={s.id}>
-                          <td><span style={{ textTransform: 'capitalize' }}>{s.type}</span></td>
+                          <td>
+                            <strong>
+                              {s.type ? s.type.charAt(0).toUpperCase() + s.type.slice(1) : 'Assessment'}
+                            </strong>
+                          </td>
                           <td>{s.subject}</td>
-                          <td><strong>{s.topic}</strong></td>
                           <td>{s.score} / {s.max_score}</td>
                           <td>
                             <span style={{ fontWeight: 'bold', color: pct >= 70 ? '#059669' : pct >= 50 ? '#d97706' : '#dc2626' }}>
                               {pct}%
+                            </span>
+                          </td>
+                          <td>
+                            <span className={`badge ${pct < 55 ? 'badge-review' : pct < 75 ? 'badge-progress' : 'badge-mastered'}`}>
+                              {pct >= 75 ? 'Mastered' : pct >= 55 ? 'In Progress' : 'Needs Review'}
                             </span>
                           </td>
                         </tr>

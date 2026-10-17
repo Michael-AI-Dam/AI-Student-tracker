@@ -727,11 +727,17 @@ Keep it under 150 words, honest but respectful in tone. Address the student dire
 
 function calculateCompositeScore(scores) {
   if (!scores || !Array.isArray(scores) || scores.length === 0) return 0;
-  const weights = { exam: 0.5, quiz: 0.2, assignment: 0.2, participation: 0.1 };
+  const weights = {
+    exam: 0.4,
+    test: 0.2,
+    quiz: 0.15,
+    assignment: 0.15,
+    participation: 0.1,
+  };
   const byType = {};
 
   scores.forEach((s) => {
-    const t = s.type || 'assignment';
+    const t = (s.type || 'assignment').toLowerCase();
     if (!byType[t]) byType[t] = { totalScore: 0, totalMax: 0 };
     byType[t].totalScore += Number(s.score) || 0;
     byType[t].totalMax += Number(s.max_score) || 0;
@@ -741,10 +747,11 @@ function calculateCompositeScore(scores) {
   let weightUsed = 0;
 
   Object.entries(byType).forEach(([type, { totalScore, totalMax }]) => {
-    if (totalMax > 0 && weights[type]) {
+    const w = weights[type] || 0.15;
+    if (totalMax > 0 && w) {
       const pct = (totalScore / totalMax) * 100;
-      weightedSum += pct * weights[type];
-      weightUsed += weights[type];
+      weightedSum += pct * w;
+      weightUsed += w;
     }
   });
 
@@ -871,7 +878,44 @@ app.get('/api/teachers/:teacherId/analytics', requireDb, async (req, res) => {
       ? Number((totalCompositeSum / studentsWithScoresCount).toFixed(1))
       : 0;
 
-    // Aggregate topic difficulty across class by Assessment Category
+    // Aggregate by Assessment Type (Assignment, Quiz, Test, Participation, Exam)
+    const assessmentTypes = ['assignment', 'quiz', 'test', 'participation', 'exam'];
+    const typeLabels = {
+      assignment: 'Assignment',
+      quiz: 'Quiz',
+      test: 'Test',
+      participation: 'Participation',
+      exam: 'Exam',
+    };
+
+    const assessmentTypePerformance = assessmentTypes.map((typeKey) => {
+      const matchingScores = classScores.filter(
+        (s) => (s.type || '').toLowerCase() === typeKey
+      );
+      const count = matchingScores.length;
+      let totalPct = 0;
+      matchingScores.forEach((s) => {
+        if (s.max_score > 0) {
+          totalPct += (Number(s.score) / Number(s.max_score)) * 100;
+        }
+      });
+      const avgPct = count > 0 ? Number((totalPct / count).toFixed(1)) : 0;
+      let status = '—';
+      if (count > 0) {
+        if (avgPct >= 75) status = 'Mastered';
+        else if (avgPct >= 55) status = 'In Progress';
+        else status = 'Needs Review';
+      }
+      return {
+        type: typeLabels[typeKey] || typeKey,
+        typeKey,
+        count,
+        avgPct,
+        status,
+      };
+    });
+
+    // Also keep topicPerformance for backward-compatibility if needed
     const topicAgg = {};
     classScores.forEach((s) => {
       if (!s.topic) return;
@@ -885,6 +929,7 @@ app.get('/api/teachers/:teacherId/analytics', requireDb, async (req, res) => {
           count: 0,
           byCategory: {
             exam: 0,
+            test: 0,
             quiz: 0,
             assignment: 0,
             participation: 0,
@@ -921,6 +966,7 @@ app.get('/api/teachers/:teacherId/analytics', requireDb, async (req, res) => {
       totalScores: classScores.length,
       classAverage,
       distribution,
+      assessmentTypePerformance,
       topicPerformance,
       atRiskStudents,
       studentsSummary,
@@ -948,32 +994,64 @@ app.get('/api/students/:id/analytics', requireDb, async (req, res) => {
     const scores = scoresSnapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
     const compositeScore = calculateCompositeScore(scores);
 
-    // Subject breakdown with topic grouping
+    // Grouping strictly by Assessment Type instead of Topics
+    const typeDisplayLabels = {
+      assignment: 'Assignment',
+      quiz: 'Quiz',
+      test: 'Test',
+      participation: 'Participation',
+      exam: 'Exam',
+    };
+
     const subjectMap = {};
     scores.forEach((s) => {
       const sub = s.subject || 'General';
       if (!subjectMap[sub]) {
-        subjectMap[sub] = { subject: sub, totalScore: 0, totalMax: 0, scoresCount: 0, topics: {} };
+        subjectMap[sub] = {
+          subject: sub,
+          totalScore: 0,
+          totalMax: 0,
+          scoresCount: 0,
+          assessments: [],
+          assessmentTypes: {},
+        };
       }
       subjectMap[sub].totalScore += Number(s.score) || 0;
       subjectMap[sub].totalMax += Number(s.max_score) || 0;
       subjectMap[sub].scoresCount++;
 
-      if (s.topic) {
-        const top = s.topic.trim();
-        if (!subjectMap[sub].topics[top]) {
-          subjectMap[sub].topics[top] = { topic: top, totalScore: 0, totalMax: 0, count: 0 };
-        }
-        subjectMap[sub].topics[top].totalScore += Number(s.score) || 0;
-        subjectMap[sub].topics[top].totalMax += Number(s.max_score) || 0;
-        subjectMap[sub].topics[top].count++;
+      const typeKey = (s.type || 'assignment').toLowerCase();
+      const typeLabel = typeDisplayLabels[typeKey] || (typeKey.charAt(0).toUpperCase() + typeKey.slice(1));
+      const scorePct = s.max_score > 0 ? Number(((Number(s.score) / Number(s.max_score)) * 100).toFixed(1)) : 0;
+
+      subjectMap[sub].assessments.push({
+        id: s.id,
+        type: typeLabel,
+        typeKey,
+        score: Number(s.score),
+        max_score: Number(s.max_score),
+        avgPct: scorePct,
+      });
+
+      if (!subjectMap[sub].assessmentTypes[typeKey]) {
+        subjectMap[sub].assessmentTypes[typeKey] = {
+          type: typeLabel,
+          typeKey,
+          totalScore: 0,
+          totalMax: 0,
+          count: 0,
+        };
       }
+      subjectMap[sub].assessmentTypes[typeKey].totalScore += Number(s.score) || 0;
+      subjectMap[sub].assessmentTypes[typeKey].totalMax += Number(s.max_score) || 0;
+      subjectMap[sub].assessmentTypes[typeKey].count++;
     });
 
     const subjectBreakdown = Object.values(subjectMap).map((sm) => {
       const avgPct = sm.totalMax > 0 ? Number(((sm.totalScore / sm.totalMax) * 100).toFixed(1)) : 0;
-      const topicList = Object.values(sm.topics).map((tp) => ({
-        topic: tp.topic,
+      const typeSummaryList = Object.values(sm.assessmentTypes).map((tp) => ({
+        type: tp.type,
+        typeKey: tp.typeKey,
         avgPct: tp.totalMax > 0 ? Number(((tp.totalScore / tp.totalMax) * 100).toFixed(1)) : 0,
         count: tp.count,
       }));
@@ -981,7 +1059,8 @@ app.get('/api/students/:id/analytics', requireDb, async (req, res) => {
         subject: sm.subject,
         avgPct,
         scoresCount: sm.scoresCount,
-        topics: topicList,
+        assessments: sm.assessments,
+        assessmentTypes: typeSummaryList,
       };
     });
 
@@ -989,38 +1068,12 @@ app.get('/api/students/:id/analytics', requireDb, async (req, res) => {
     const subjectStrengths = subjectBreakdown.filter((s) => s.avgPct >= 75);
     const subjectWeaknesses = subjectBreakdown.filter((s) => s.avgPct < 60);
 
-    // Overall topic breakdown
-    const topicMap = {};
-    scores.forEach((s) => {
-      if (!s.topic) return;
-      const top = s.topic.trim();
-      if (!topicMap[top]) topicMap[top] = { topic: top, subject: s.subject || 'General', totalScore: 0, totalMax: 0 };
-      topicMap[top].totalScore += Number(s.score) || 0;
-      topicMap[top].totalMax += Number(s.max_score) || 0;
-    });
-
-    const topics = Object.values(topicMap).map((t) => {
-      const avgPct = t.totalMax > 0 ? Number(((t.totalScore / t.totalMax) * 100).toFixed(1)) : 0;
-      return {
-        topic: t.topic,
-        subject: t.subject,
-        avgPct,
-        isWeak: avgPct < 60,
-      };
-    });
-
-    const strengths = topics.filter((t) => t.avgPct >= 75);
-    const weaknesses = topics.filter((t) => t.avgPct < 60);
-
     res.json({
       compositeScore,
       totalScores: scores.length,
       subjectBreakdown,
       subjectStrengths,
       subjectWeaknesses,
-      topics,
-      strengths,
-      weaknesses,
     });
   } catch (err) {
     console.error('Student analytics error:', err);
