@@ -6,13 +6,15 @@ const API_URL = (import.meta.env.VITE_API_URL || 'https://ai-student-tracker-ste
 function App() {
   // Auth state
   const [currentUser, setCurrentUser] = useState(null)
-  const [authMode, setAuthMode] = useState('login')
+  const [authMode, setAuthMode] = useState('login') // 'login' | 'signup' | 'forgot'
   const [authName, setAuthName] = useState('')
   const [authEmail, setAuthEmail] = useState('')
   const [authPassword, setAuthPassword] = useState('')
+  const [confirmPassword, setConfirmPassword] = useState('')
   const [authRole, setAuthRole] = useState('teacher')
   const [accessCode, setAccessCode] = useState('')
   const [authError, setAuthError] = useState('')
+  const [authSuccess, setAuthSuccess] = useState('')
 
   // Active Tab
   const [activeTab, setActiveTab] = useState('analytics')
@@ -46,10 +48,10 @@ function App() {
   const [studentAnalytics, setStudentAnalytics] = useState(null)
   const [loadingStudentAnalytics, setLoadingStudentAnalytics] = useState(false)
 
-  // AIDT Personalized Learning Materials State
-  const [selectedTopicForAIDT, setSelectedTopicForAIDT] = useState('')
-  const [aidtMaterials, setAidtMaterials] = useState(null)
-  const [loadingAIDT, setLoadingAIDT] = useState(false)
+  // Learn with AI Materials State
+  const [selectedTopicForStudy, setSelectedTopicForStudy] = useState('')
+  const [studyMaterials, setStudyMaterials] = useState(null)
+  const [loadingStudy, setLoadingStudy] = useState(false)
   const [revealedAnswers, setRevealedAnswers] = useState({})
 
   // Adaptive Quiz State
@@ -58,6 +60,19 @@ function App() {
   const [loadingQuiz, setLoadingQuiz] = useState(false)
   const [userQuizAnswers, setUserQuizAnswers] = useState({})
   const [revealedHints, setRevealedHints] = useState({})
+
+  // Helper to format student label: Name (Class) — no long hyphens
+  const formatStudentLabel = (name, className) => {
+    if (!name) return ''
+    return className ? `${name} (${className})` : name
+  }
+
+  // Clicking Logo takes user back to their main dashboard
+  const handleLogoClick = () => {
+    if (currentUser) {
+      setActiveTab(currentUser.role === 'teacher' ? 'analytics' : 'student_dashboard')
+    }
+  }
 
   // Fetch Students for Teacher
   const fetchStudents = (teacherId) => {
@@ -131,27 +146,27 @@ function App() {
       })
   }
 
-  // AIDT Generator
+  // Study Materials Generator
   const handleGenerateMaterials = (topicToUse) => {
     const targetId = currentUser?.role === 'student' ? currentUser.student_id : profileStudentId
     if (!targetId) return
-    setLoadingAIDT(true)
-    setAidtMaterials(null)
+    setLoadingStudy(true)
+    setStudyMaterials(null)
     setRevealedAnswers({})
 
     fetch(`${API_URL}/api/students/${encodeURIComponent(targetId)}/personalized-materials`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ topic: topicToUse || selectedTopicForAIDT }),
+      body: JSON.stringify({ topic: topicToUse || selectedTopicForStudy }),
     })
       .then((res) => res.json())
       .then((data) => {
-        setAidtMaterials(data.materials || null)
-        setLoadingAIDT(false)
+        setStudyMaterials(data.materials || null)
+        setLoadingStudy(false)
       })
       .catch((err) => {
-        console.error('AIDT generation error:', err)
-        setLoadingAIDT(false)
+        console.error('Study material generation error:', err)
+        setLoadingStudy(false)
       })
   }
 
@@ -200,6 +215,7 @@ function App() {
   const handleLogin = (e) => {
     e.preventDefault()
     setAuthError('')
+    setAuthSuccess('')
     fetch(`${API_URL}/api/login`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -217,6 +233,7 @@ function App() {
   const handleSignup = (e) => {
     e.preventDefault()
     setAuthError('')
+    setAuthSuccess('')
     fetch(`${API_URL}/api/signup`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -237,18 +254,54 @@ function App() {
       .catch((err) => setAuthError(err.message))
   }
 
+  const handleResetPassword = (e) => {
+    e.preventDefault()
+    setAuthError('')
+    setAuthSuccess('')
+
+    if (authPassword !== confirmPassword) {
+      setAuthError('Passwords do not match. Please re-enter.')
+      return
+    }
+
+    if (authPassword.length < 6) {
+      setAuthError('New password must be at least 6 characters long.')
+      return
+    }
+
+    fetch(`${API_URL}/api/reset-password`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        email: authEmail,
+        newPassword: authPassword,
+      }),
+    })
+      .then(async (res) => {
+        const data = await res.json()
+        if (!res.ok) throw new Error(data.error || 'Password reset failed')
+        setAuthSuccess(data.message || 'Password reset successfully! You can now log in.')
+        setAuthPassword('')
+        setConfirmPassword('')
+      })
+      .catch((err) => setAuthError(err.message))
+  }
+
   const handleLogout = () => {
     setCurrentUser(null)
     setAuthEmail('')
     setAuthPassword('')
+    setConfirmPassword('')
     setAuthName('')
     setAccessCode('')
+    setAuthError('')
+    setAuthSuccess('')
     setStudents([])
     setProfile(null)
     setRecommendation('')
     setTeacherAnalytics(null)
     setStudentAnalytics(null)
-    setAidtMaterials(null)
+    setStudyMaterials(null)
     setQuizData(null)
   }
 
@@ -267,7 +320,7 @@ function App() {
       .then(async (res) => {
         const data = await res.json()
         if (!res.ok) throw new Error(data.error || 'Failed to add student')
-        setStudentMessage(`Student added! Access Code: ${data.access_code}`)
+        setStudentMessage(`Student registered! Access Code: ${data.access_code}`)
         setNewStudentName('')
         setNewStudentClass('')
         fetchStudents(currentUser.id)
@@ -294,7 +347,7 @@ function App() {
       .then(async (res) => {
         const data = await res.json()
         if (!res.ok) throw new Error(data.error || 'Failed to add score')
-        setScoreMessage('Score recorded successfully!')
+        setScoreMessage('Assessment score recorded successfully!')
         setTopic('')
         setScoreVal('')
         setMaxScoreVal('')
@@ -334,30 +387,31 @@ function App() {
   // --- Auth View ---
   if (!currentUser) {
     return (
-      <div className="aidt-container" style={{ maxWidth: '440px', paddingTop: '40px' }}>
+      <div className="tracker-container" style={{ maxWidth: '440px', paddingTop: '40px' }}>
         <div style={{ textAlign: 'center', marginBottom: '24px' }}>
           <div className="brand-icon" style={{ margin: '0 auto 12px', width: '52px', height: '52px', fontSize: '24px' }}>
-            ⚡
+            🎓
           </div>
-          <h1 style={{ fontSize: '24px', fontWeight: '800', color: '#1e3a8a', margin: '0 0 4px' }}>
-            EduSTEM AIDT 2.0
+          <h1 style={{ fontSize: '23px', fontWeight: '800', color: '#0f172a', margin: '0 0 4px', letterSpacing: '-0.02em' }}>
+            AI Student Tracker
           </h1>
           <p style={{ color: '#64748b', fontSize: '13px', margin: 0 }}>
-            South Korea AI Digital Textbook Adaptive Platform
+            Personalized Learning & Performance Assessment Platform
           </p>
         </div>
 
-        <div className="data-card">
+        <div className="data-card" style={{ padding: '26px' }}>
+          {/* Top Mode Selector Tabs */}
           <div style={{ display: 'flex', gap: '8px', marginBottom: '20px' }}>
             <button
-              onClick={() => { setAuthMode('login'); setAuthError('') }}
+              onClick={() => { setAuthMode('login'); setAuthError(''); setAuthSuccess('') }}
               className={authMode === 'login' ? 'btn-primary' : 'btn-secondary'}
               style={{ flex: 1 }}
             >
               Log In
             </button>
             <button
-              onClick={() => { setAuthMode('signup'); setAuthError('') }}
+              onClick={() => { setAuthMode('signup'); setAuthError(''); setAuthSuccess('') }}
               className={authMode === 'signup' ? 'btn-primary' : 'btn-secondary'}
               style={{ flex: 1 }}
             >
@@ -365,62 +419,181 @@ function App() {
             </button>
           </div>
 
-          {authMode === 'login' ? (
+          {/* Form: LOGIN */}
+          {authMode === 'login' && (
             <form onSubmit={handleLogin} style={{ display: 'flex', flexDirection: 'column', gap: '14px', border: 'none', padding: 0, boxShadow: 'none' }}>
               <label>
                 Email Address:
-                <input type="email" value={authEmail} onChange={(e) => setAuthEmail(e.target.value)} required />
+                <input
+                  type="email"
+                  value={authEmail}
+                  onChange={(e) => setAuthEmail(e.target.value)}
+                  placeholder="name@school.edu"
+                  required
+                />
               </label>
               <label>
                 Password:
-                <input type="password" value={authPassword} onChange={(e) => setAuthPassword(e.target.value)} required />
+                <input
+                  type="password"
+                  value={authPassword}
+                  onChange={(e) => setAuthPassword(e.target.value)}
+                  placeholder="••••••••"
+                  required
+                />
               </label>
-              <button type="submit" className="btn-primary" style={{ marginTop: '8px' }}>
-                Enter Learning Portal
+
+              <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                <button
+                  type="button"
+                  onClick={() => { setAuthMode('forgot'); setAuthError(''); setAuthSuccess('') }}
+                  style={{ background: 'transparent', border: 'none', color: '#2563eb', padding: 0, fontSize: '12px', cursor: 'pointer', fontWeight: '600' }}
+                >
+                  Forgot password?
+                </button>
+              </div>
+
+              <button type="submit" className="btn-primary" style={{ marginTop: '4px', padding: '12px' }}>
+                Sign In to Dashboard
               </button>
             </form>
-          ) : (
+          )}
+
+          {/* Form: SIGN UP */}
+          {authMode === 'signup' && (
             <form onSubmit={handleSignup} style={{ display: 'flex', flexDirection: 'column', gap: '14px', border: 'none', padding: 0, boxShadow: 'none' }}>
               <label>
                 Full Name:
-                <input value={authName} onChange={(e) => setAuthName(e.target.value)} required />
+                <input
+                  value={authName}
+                  onChange={(e) => setAuthName(e.target.value)}
+                  placeholder="e.g. Toheeb Adeleke"
+                  required
+                />
               </label>
               <label>
                 Email Address:
-                <input type="email" value={authEmail} onChange={(e) => setAuthEmail(e.target.value)} required />
+                <input
+                  type="email"
+                  value={authEmail}
+                  onChange={(e) => setAuthEmail(e.target.value)}
+                  placeholder="name@school.edu"
+                  required
+                />
               </label>
               <label>
                 Password:
-                <input type="password" value={authPassword} onChange={(e) => setAuthPassword(e.target.value)} required />
+                <input
+                  type="password"
+                  value={authPassword}
+                  onChange={(e) => setAuthPassword(e.target.value)}
+                  placeholder="••••••••"
+                  required
+                />
               </label>
               <label>
                 I am registering as:
                 <select value={authRole} onChange={(e) => setAuthRole(e.target.value)}>
-                  <option value="teacher">Teacher (Classroom Cockpit)</option>
-                  <option value="student">Student (Adaptive Learning Space)</option>
+                  <option value="teacher">Teacher (Classroom Analytics Cockpit)</option>
+                  <option value="student">Student (Personal Learning Portal)</option>
                 </select>
               </label>
               {authRole === 'student' && (
                 <label>
-                  Access Code (from your teacher):
+                  Access Code (provided by your teacher):
                   <input
                     value={accessCode}
                     onChange={(e) => setAccessCode(e.target.value)}
-                    placeholder="e.g. 8K2X9P"
+                    placeholder="e.g. FAYJAS"
                     required
                   />
                 </label>
               )}
-              <button type="submit" className="btn-primary" style={{ marginTop: '8px' }}>
+              <button type="submit" className="btn-primary" style={{ marginTop: '6px', padding: '12px' }}>
                 Create Account
               </button>
             </form>
           )}
 
+          {/* Form: FORGOT / RESET PASSWORD */}
+          {authMode === 'forgot' && (
+            <form onSubmit={handleResetPassword} style={{ display: 'flex', flexDirection: 'column', gap: '14px', border: 'none', padding: 0, boxShadow: 'none' }}>
+              <div style={{ marginBottom: '4px' }}>
+                <h4 style={{ margin: '0 0 4px', fontSize: '16px', color: '#0f172a' }}>Reset Your Password</h4>
+                <p style={{ margin: 0, fontSize: '13px', color: '#64748b' }}>
+                  Enter your registered email and choose a new password.
+                </p>
+              </div>
+
+              <label>
+                Registered Email Address:
+                <input
+                  type="email"
+                  value={authEmail}
+                  onChange={(e) => setAuthEmail(e.target.value)}
+                  placeholder="name@school.edu"
+                  required
+                />
+              </label>
+
+              <label>
+                New Password:
+                <input
+                  type="password"
+                  value={authPassword}
+                  onChange={(e) => setAuthPassword(e.target.value)}
+                  placeholder="At least 6 characters"
+                  required
+                />
+              </label>
+
+              <label>
+                Confirm New Password:
+                <input
+                  type="password"
+                  value={confirmPassword}
+                  onChange={(e) => setConfirmPassword(e.target.value)}
+                  placeholder="Re-enter password"
+                  required
+                />
+              </label>
+
+              <button type="submit" className="btn-primary" style={{ marginTop: '6px', padding: '12px' }}>
+                Save New Password
+              </button>
+
+              <button
+                type="button"
+                onClick={() => { setAuthMode('login'); setAuthError(''); setAuthSuccess('') }}
+                className="btn-secondary"
+                style={{ textAlign: 'center' }}
+              >
+                ← Back to Log In
+              </button>
+            </form>
+          )}
+
+          {/* Feedback messages */}
           {authError && (
-            <p style={{ color: '#ef4444', background: '#fef2f2', padding: '10px', borderRadius: '8px', marginTop: '14px', fontSize: '13px' }}>
+            <p style={{ color: '#dc2626', background: '#fef2f2', border: '1px solid #fecaca', padding: '10px 14px', borderRadius: '8px', marginTop: '14px', fontSize: '13px' }}>
               {authError}
             </p>
+          )}
+
+          {authSuccess && (
+            <div style={{ marginTop: '14px', padding: '12px 14px', background: '#ecfdf5', border: '1px solid #a7f3d0', color: '#065f46', borderRadius: '8px', fontSize: '13px' }}>
+              {authSuccess}
+              <div style={{ marginTop: '8px' }}>
+                <button
+                  type="button"
+                  onClick={() => { setAuthMode('login'); setAuthError(''); setAuthSuccess('') }}
+                  className="btn-primary"
+                  style={{ padding: '6px 14px', fontSize: '12px' }}
+                >
+                  Log In Now →
+                </button>
+              </div>
+            </div>
           )}
         </div>
       </div>
@@ -429,15 +602,20 @@ function App() {
 
   // --- Main Application View ---
   return (
-    <div className="aidt-container">
-      {/* Header */}
-      <header className="aidt-header">
-        <div className="brand-badge">
-          <div className="brand-icon">📚</div>
+    <div className="tracker-container">
+      {/* Header — Clicking Logo returns user directly to their main dashboard */}
+      <header className="tracker-header">
+        <div
+          className="brand-badge"
+          onClick={handleLogoClick}
+          style={{ cursor: 'pointer' }}
+          title="Return to Main Dashboard"
+        >
+          <div className="brand-icon">🎓</div>
           <div>
-            <h1 className="brand-title">EduSTEM AI Digital Textbook</h1>
+            <h1 className="brand-title">AI Student Tracker</h1>
             <div className="brand-subtitle">
-              AIDT 2.0 • {currentUser.role === 'teacher' ? 'Teacher Analytics Cockpit' : 'Personal Adaptive Space'}
+              {currentUser.role === 'teacher' ? 'Teacher Analytics Cockpit' : 'Student Learning Portal'}
             </div>
           </div>
         </div>
@@ -446,7 +624,9 @@ function App() {
           <span className={`role-pill ${currentUser.role}`}>
             {currentUser.role}
           </span>
-          <span style={{ fontWeight: '600', fontSize: '14px' }}>{currentUser.name}</span>
+          <span style={{ fontWeight: '600', fontSize: '14px', color: '#1e293b' }}>
+            {currentUser.name}
+          </span>
           <button onClick={handleLogout} className="btn-logout">
             Log Out
           </button>
@@ -461,7 +641,7 @@ function App() {
               onClick={() => setActiveTab('analytics')}
               className={`tab-btn ${activeTab === 'analytics' ? 'active' : ''}`}
             >
-              📊 Class Analytics & Cockpit
+              📊 Class Overview & Analytics
             </button>
             <button
               onClick={() => setActiveTab('roster')}
@@ -488,13 +668,13 @@ function App() {
               onClick={() => setActiveTab('student_dashboard')}
               className={`tab-btn ${activeTab === 'student_dashboard' ? 'active' : ''}`}
             >
-              📈 My Growth & Mastery
+              📈 My Performance & Mastery
             </button>
             <button
-              onClick={() => setActiveTab('aidt_materials')}
-              className={`tab-btn ${activeTab === 'aidt_materials' ? 'active' : ''}`}
+              onClick={() => setActiveTab('study_materials')}
+              className={`tab-btn ${activeTab === 'study_materials' ? 'active' : ''}`}
             >
-              📖 AI Digital Textbook Materials
+              📖 Learn with AI Materials
             </button>
             <button
               onClick={() => setActiveTab('practice_quiz')}
@@ -506,14 +686,14 @@ function App() {
               onClick={() => setActiveTab('my_scores')}
               className={`tab-btn ${activeTab === 'my_scores' ? 'active' : ''}`}
             >
-              📋 Score Records
+              📋 My Assessment History
             </button>
           </>
         )}
       </nav>
 
       {/* ============================================================== */}
-      {/* TEACHER TAB 1: CLASS ANALYTICS & COCKPIT                       */}
+      {/* TEACHER TAB 1: CLASS OVERVIEW & COCKPIT                        */}
       {/* ============================================================== */}
       {currentUser.role === 'teacher' && activeTab === 'analytics' && (
         <div>
@@ -530,7 +710,7 @@ function App() {
                 </div>
                 <div className="metric-card">
                   <span className="metric-label">Class Average</span>
-                  <span className="metric-val" style={{ color: teacherAnalytics.classAverage >= 70 ? '#10b981' : '#f59e0b' }}>
+                  <span className="metric-val" style={{ color: teacherAnalytics.classAverage >= 70 ? '#059669' : teacherAnalytics.classAverage >= 50 ? '#d97706' : '#dc2626' }}>
                     {teacherAnalytics.classAverage}%
                   </span>
                   <span className="metric-sub">Weighted Composite</span>
@@ -542,7 +722,7 @@ function App() {
                 </div>
                 <div className="metric-card">
                   <span className="metric-label">Needing Support</span>
-                  <span className="metric-val" style={{ color: teacherAnalytics.atRiskStudents.length > 0 ? '#ef4444' : '#10b981' }}>
+                  <span className="metric-val" style={{ color: teacherAnalytics.atRiskStudents.length > 0 ? '#dc2626' : '#059669' }}>
                     {teacherAnalytics.atRiskStudents.length}
                   </span>
                   <span className="metric-sub">Scores below 60%</span>
@@ -552,9 +732,12 @@ function App() {
               {/* Mastery Distribution Bar */}
               {teacherAnalytics.totalStudents > 0 && (
                 <div className="dist-container">
-                  <h4 style={{ margin: '0 0 8px', fontSize: '15px', color: '#1e3a8a' }}>
-                    Student Mastery Distribution (South Korea AIDT Standard)
+                  <h4 style={{ margin: '0 0 6px', fontSize: '15px', color: '#0f172a', fontWeight: '700' }}>
+                    Student Mastery Distribution (Performance Standards)
                   </h4>
+                  <p style={{ fontSize: '12px', color: '#64748b', margin: '0 0 12px' }}>
+                    Holistic breakdown based on combined exam, quiz, assignment, and participation assessments.
+                  </p>
                   <div className="dist-bar-wrapper">
                     {teacherAnalytics.distribution.advanced > 0 && (
                       <div
@@ -591,39 +774,40 @@ function App() {
                   </div>
                   <div className="dist-legend">
                     <div className="dist-legend-item">
-                      <div className="legend-dot" style={{ background: '#10b981' }}></div>
+                      <div className="legend-dot" style={{ background: '#059669' }}></div>
                       Advanced (≥80%): {teacherAnalytics.distribution.advanced}
                     </div>
                     <div className="dist-legend-item">
-                      <div className="legend-dot" style={{ background: '#3b82f6' }}></div>
+                      <div className="legend-dot" style={{ background: '#2563eb' }}></div>
                       Proficient (65-79%): {teacherAnalytics.distribution.proficient}
                     </div>
                     <div className="dist-legend-item">
-                      <div className="legend-dot" style={{ background: '#f59e0b' }}></div>
+                      <div className="legend-dot" style={{ background: '#d97706' }}></div>
                       Basic (50-64%): {teacherAnalytics.distribution.basic}
                     </div>
                     <div className="dist-legend-item">
-                      <div className="legend-dot" style={{ background: '#ef4444' }}></div>
+                      <div className="legend-dot" style={{ background: '#dc2626' }}></div>
                       Needs Support (&lt;50%): {teacherAnalytics.distribution.needsHelp}
                     </div>
                   </div>
                 </div>
               )}
 
-              {/* Intervention Alerts */}
+              {/* Early Intervention Alerts */}
               {teacherAnalytics.atRiskStudents.length > 0 && (
                 <div className="intervention-box">
                   <div className="intervention-title">
                     ⚠️ Early Intervention Alert ({teacherAnalytics.atRiskStudents.length} Students Flagged)
                   </div>
-                  <p style={{ fontSize: '13px', color: '#78350f', margin: '0 0 12px' }}>
-                    The AIDT diagnostic engine identified the following students whose composite average is below 60% or who struggled on multiple topic assessments.
+                  <p className="intervention-desc">
+                    The diagnostic engine identified students whose composite average is below 60% or who struggled on multiple topic assessments.
                   </p>
                   <div className="intervention-list">
                     {teacherAnalytics.atRiskStudents.map((s) => (
                       <div key={s.id} className="intervention-item">
                         <div>
-                          <strong>{s.name}</strong> ({s.class_name}) — Composite: <span style={{ color: '#ef4444', fontWeight: 'bold' }}>{s.compositeScore}%</span>
+                          <strong>{formatStudentLabel(s.name, s.class_name)}</strong> • Composite:{' '}
+                          <span style={{ color: '#dc2626', fontWeight: 'bold' }}>{s.compositeScore}%</span>
                         </div>
                         {s.weakTopics?.length > 0 && (
                           <div style={{ fontSize: '12px', color: '#64748b' }}>
@@ -636,7 +820,7 @@ function App() {
                             setActiveTab('profiles')
                           }}
                           className="btn-secondary"
-                          style={{ padding: '4px 10px', fontSize: '12px' }}
+                          style={{ padding: '6px 12px', fontSize: '12px' }}
                         >
                           View Student Profile →
                         </button>
@@ -646,10 +830,10 @@ function App() {
                 </div>
               )}
 
-              {/* Topic Performance Matrix */}
+              {/* Class-Wide Topic Difficulty Matrix */}
               <div className="data-card">
                 <h3>Class-Wide Topic Difficulty Matrix</h3>
-                <p style={{ fontSize: '13px', color: '#64748b', marginTop: '-10px', marginBottom: '16px' }}>
+                <p className="data-card-subtitle">
                   Ranked by difficulty. Topics at the top are where students struggled the most across all tests.
                 </p>
                 {teacherAnalytics.topicPerformance.length === 0 ? (
@@ -673,13 +857,13 @@ function App() {
                           <td>{t.count}</td>
                           <td>
                             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                              <span>{t.avgPct}%</span>
+                              <span style={{ minWidth: '40px', fontWeight: '600' }}>{t.avgPct}%</span>
                               <div style={{ flex: 1, height: '6px', background: '#e2e8f0', borderRadius: '3px', overflow: 'hidden' }}>
                                 <div
                                   style={{
                                     height: '100%',
                                     width: `${t.avgPct}%`,
-                                    background: t.avgPct < 55 ? '#ef4444' : t.avgPct < 75 ? '#3b82f6' : '#10b981'
+                                    background: t.avgPct < 55 ? '#dc2626' : t.avgPct < 75 ? '#2563eb' : '#059669'
                                   }}
                                 ></div>
                               </div>
@@ -710,6 +894,9 @@ function App() {
         <div>
           <div className="data-card">
             <h3>Add New Student to Classroom</h3>
+            <p className="data-card-subtitle">
+              Register a student to generate a unique access code they can use to view their private portal.
+            </p>
             <form onSubmit={handleAddStudent} style={{ border: 'none', padding: 0, boxShadow: 'none' }}>
               <div className="form-grid">
                 <label>
@@ -717,7 +904,7 @@ function App() {
                   <input
                     value={newStudentName}
                     onChange={(e) => setNewStudentName(e.target.value)}
-                    placeholder="e.g. Min-jun Kim"
+                    placeholder="e.g. Toheeb Adeleke"
                     required
                   />
                 </label>
@@ -726,7 +913,7 @@ function App() {
                   <input
                     value={newStudentClass}
                     onChange={(e) => setNewStudentClass(e.target.value)}
-                    placeholder="e.g. Grade 10 Chemistry"
+                    placeholder="e.g. SSS 1 or Grade 10"
                   />
                 </label>
               </div>
@@ -735,7 +922,7 @@ function App() {
               </button>
             </form>
             {studentMessage && (
-              <p style={{ marginTop: '12px', padding: '10px', background: '#ecfdf5', color: '#065f46', borderRadius: '8px' }}>
+              <p style={{ marginTop: '14px', padding: '12px', background: '#ecfdf5', color: '#065f46', border: '1px solid #a7f3d0', borderRadius: '8px' }}>
                 {studentMessage}
               </p>
             )}
@@ -743,16 +930,19 @@ function App() {
 
           <div className="data-card">
             <h3>Class Roster & Access Codes</h3>
+            <p className="data-card-subtitle">
+              Students use their private Access Code to create an account and view their personal learning dashboard.
+            </p>
             {studentsLoading ? (
               <p>Loading roster...</p>
             ) : students.length === 0 ? (
-              <p>No students registered yet. Add a student using the form above.</p>
+              <p style={{ color: '#64748b' }}>No students registered yet. Add a student using the form above.</p>
             ) : (
               <table>
                 <thead>
                   <tr>
-                    <th>Student Name</th>
-                    <th>Class</th>
+                    <th>Student Full Name</th>
+                    <th>Class / Grade</th>
                     <th>Student Access Code</th>
                     <th>Actions</th>
                   </tr>
@@ -761,9 +951,9 @@ function App() {
                   {students.map((s) => (
                     <tr key={s.id}>
                       <td><strong>{s.name}</strong></td>
-                      <td>{s.class_name}</td>
+                      <td>{s.class_name || 'General'}</td>
                       <td>
-                        <code style={{ background: '#f1f5f9', padding: '3px 8px', borderRadius: '4px', fontWeight: 'bold' }}>
+                        <code style={{ background: '#f1f5f9', padding: '4px 8px', borderRadius: '4px', fontWeight: 'bold', color: '#1e40af' }}>
                           {s.access_code}
                         </code>
                       </td>
@@ -774,7 +964,7 @@ function App() {
                             setActiveTab('profiles')
                           }}
                           className="btn-secondary"
-                          style={{ padding: '4px 10px', fontSize: '12px' }}
+                          style={{ padding: '6px 12px', fontSize: '12px' }}
                         >
                           View Profile & AI →
                         </button>
@@ -794,16 +984,19 @@ function App() {
       {currentUser.role === 'teacher' && activeTab === 'scores' && (
         <div className="data-card" style={{ maxWidth: '650px', margin: '0 auto' }}>
           <h3>Record Learning Assessment Score</h3>
+          <p className="data-card-subtitle">
+            Record multi-dimensional assessments (exams, quizzes, assignments, participation) to ground AI recommendations in real data.
+          </p>
           {students.length === 0 ? (
-            <p>Please add a student to your class first before recording scores.</p>
+            <p style={{ color: '#64748b' }}>Please add a student to your class first before recording scores.</p>
           ) : (
-            <form onSubmit={handleAddScore} style={{ display: 'flex', flexDirection: 'column', gap: '14px', border: 'none', padding: 0, boxShadow: 'none' }}>
+            <form onSubmit={handleAddScore} style={{ display: 'flex', flexDirection: 'column', gap: '16px', border: 'none', padding: 0, boxShadow: 'none' }}>
               <label>
                 Select Student:
                 <select value={studentId} onChange={(e) => setStudentId(e.target.value)}>
                   {students.map((s) => (
                     <option key={s.id} value={s.id}>
-                      {s.name} ({s.class_name})
+                      {formatStudentLabel(s.name, s.class_name)}
                     </option>
                   ))}
                 </select>
@@ -821,7 +1014,7 @@ function App() {
                 </label>
                 <label>
                   Subject:
-                  <input value={subject} onChange={(e) => setSubject(e.target.value)} required />
+                  <input value={subject} onChange={(e) => setSubject(e.target.value)} placeholder="e.g. Chemistry" required />
                 </label>
               </div>
 
@@ -838,11 +1031,11 @@ function App() {
               <div className="form-grid">
                 <label>
                   Student Score:
-                  <input type="number" step="any" value={scoreVal} onChange={(e) => setScoreVal(e.target.value)} required />
+                  <input type="number" step="any" value={scoreVal} onChange={(e) => setScoreVal(e.target.value)} placeholder="e.g. 18" required />
                 </label>
                 <label>
                   Max Possible Score:
-                  <input type="number" step="any" value={maxScoreVal} onChange={(e) => setMaxScoreVal(e.target.value)} required />
+                  <input type="number" step="any" value={maxScoreVal} onChange={(e) => setMaxScoreVal(e.target.value)} placeholder="e.g. 20" required />
                 </label>
               </div>
 
@@ -853,7 +1046,7 @@ function App() {
           )}
 
           {scoreMessage && (
-            <p style={{ marginTop: '14px', padding: '10px', background: '#ecfdf5', color: '#065f46', borderRadius: '8px' }}>
+            <p style={{ marginTop: '14px', padding: '12px', background: '#ecfdf5', color: '#065f46', border: '1px solid #a7f3d0', borderRadius: '8px' }}>
               {scoreMessage}
             </p>
           )}
@@ -871,7 +1064,7 @@ function App() {
               <select value={profileStudentId} onChange={(e) => setProfileStudentId(e.target.value)}>
                 {students.map((s) => (
                   <option key={s.id} value={s.id}>
-                    {s.name} ({s.class_name})
+                    {formatStudentLabel(s.name, s.class_name)}
                   </option>
                 ))}
               </select>
@@ -880,19 +1073,19 @@ function App() {
 
           {profile && (
             <div className="data-card">
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px', borderBottom: '1px solid #e2e8f0', paddingBottom: '16px' }}>
                 <div>
-                  <h3 style={{ margin: 0 }}>
-                    {profile.student?.name} {profile.student?.class_name ? `— ${profile.student.class_name}` : ''}
+                  <h3 style={{ margin: 0, fontSize: '20px' }}>
+                    {formatStudentLabel(profile.student?.name, profile.student?.class_name)}
                   </h3>
-                  <div style={{ fontSize: '13px', color: '#64748b' }}>
-                    Access Code: <code>{profile.student?.access_code}</code>
+                  <div style={{ fontSize: '13px', color: '#64748b', marginTop: '4px' }}>
+                    Access Code: <code style={{ fontWeight: 'bold' }}>{profile.student?.access_code}</code>
                   </div>
                 </div>
                 {profile.scores?.length > 0 && (
                   <div style={{ textAlign: 'right' }}>
-                    <span style={{ fontSize: '12px', color: '#64748b', fontWeight: 'bold' }}>COMPOSITE MASTERY</span>
-                    <div style={{ fontSize: '26px', fontWeight: '800', color: '#1e3a8a' }}>
+                    <span style={{ fontSize: '11px', color: '#64748b', fontWeight: 'bold', textTransform: 'uppercase' }}>COMPOSITE MASTERY</span>
+                    <div style={{ fontSize: '28px', fontWeight: '800', color: '#1e40af' }}>
                       {calculateComposite(profile.scores)}%
                     </div>
                   </div>
@@ -900,10 +1093,10 @@ function App() {
               </div>
 
               {!profile.scores || profile.scores.length === 0 ? (
-                <p style={{ marginTop: '16px', color: '#64748b' }}>No assessment scores on record for this student yet.</p>
+                <p style={{ marginTop: '20px', color: '#64748b' }}>No assessment scores on record for this student yet.</p>
               ) : (
                 <>
-                  <table style={{ marginTop: '16px' }}>
+                  <table style={{ marginTop: '20px' }}>
                     <thead>
                       <tr>
                         <th>Type</th>
@@ -923,7 +1116,7 @@ function App() {
                             <td><strong>{s.topic}</strong></td>
                             <td>{s.score} / {s.max_score}</td>
                             <td>
-                              <span style={{ fontWeight: 'bold', color: pct >= 70 ? '#10b981' : pct >= 50 ? '#f59e0b' : '#ef4444' }}>
+                              <span style={{ fontWeight: 'bold', color: pct >= 70 ? '#059669' : pct >= 50 ? '#d97706' : '#dc2626' }}>
                                 {pct}%
                               </span>
                             </td>
@@ -933,23 +1126,24 @@ function App() {
                     </tbody>
                   </table>
 
-                  <div style={{ marginTop: '24px', padding: '16px', background: '#f8fafc', borderRadius: '10px', border: '1px solid #e2e8f0' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
+                  {/* AI Recommendation Generator */}
+                  <div style={{ marginTop: '26px', padding: '20px', background: '#f8fafc', borderRadius: '12px', border: '1px solid #e2e8f0' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
                       <div>
-                        <h4 style={{ margin: '0 0 4px', color: '#1e3a8a' }}>AI Diagnostic Learning Recommendation</h4>
-                        <p style={{ margin: 0, fontSize: '12px', color: '#64748b' }}>
-                          Personalized assessment generated based on student scores.
+                        <h4 style={{ margin: '0 0 4px', color: '#1e40af', fontSize: '16px' }}>AI Diagnostic Learning Recommendation</h4>
+                        <p style={{ margin: 0, fontSize: '13px', color: '#64748b' }}>
+                          Generates honest, data-grounded assessment based strictly on this student's recorded scores.
                         </p>
                       </div>
                       <button onClick={() => fetchRecommendation(profileStudentId)} className="btn-primary">
-                        {loadingRec ? 'Generating...' : 'Generate AI Assessment'}
+                        {loadingRec ? 'Analyzing Performance...' : '⚡ Generate AI Assessment'}
                       </button>
                     </div>
 
-                    {loadingRec && <p style={{ marginTop: '12px', color: '#64748b' }}>Generating tailored recommendation...</p>}
+                    {loadingRec && <p style={{ marginTop: '14px', color: '#64748b' }}>Analyzing performance records...</p>}
 
                     {recommendation && (
-                      <div style={{ marginTop: '14px', padding: '14px', background: 'white', border: '1px solid #cbd5e1', borderRadius: '8px', lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>
+                      <div style={{ marginTop: '16px', padding: '16px 20px', background: 'white', border: '1px solid #cbd5e1', borderRadius: '10px', lineHeight: 1.6, whiteSpace: 'pre-wrap', fontSize: '14px', color: '#1e293b' }}>
                         {recommendation}
                       </div>
                     )}
@@ -962,7 +1156,7 @@ function App() {
       )}
 
       {/* ============================================================== */}
-      {/* STUDENT TAB 1: MY GROWTH & MASTERY DASHBOARD                   */}
+      {/* STUDENT TAB 1: MY PERFORMANCE & MASTERY DASHBOARD              */}
       {/* ============================================================== */}
       {currentUser.role === 'student' && activeTab === 'student_dashboard' && (
         <div>
@@ -974,7 +1168,7 @@ function App() {
               <div className="metrics-grid">
                 <div className="metric-card">
                   <span className="metric-label">My Overall Mastery</span>
-                  <span className="metric-val" style={{ color: studentAnalytics.compositeScore >= 70 ? '#10b981' : '#f59e0b' }}>
+                  <span className="metric-val" style={{ color: studentAnalytics.compositeScore >= 70 ? '#059669' : studentAnalytics.compositeScore >= 50 ? '#d97706' : '#dc2626' }}>
                     {studentAnalytics.compositeScore}%
                   </span>
                   <span className="metric-sub">Weighted Composite Score</span>
@@ -986,12 +1180,12 @@ function App() {
                 </div>
                 <div className="metric-card">
                   <span className="metric-label">Mastered Strengths</span>
-                  <span className="metric-val" style={{ color: '#10b981' }}>{studentAnalytics.strengths.length}</span>
+                  <span className="metric-val" style={{ color: '#059669' }}>{studentAnalytics.strengths.length}</span>
                   <span className="metric-sub">Topics ≥ 75% score</span>
                 </div>
                 <div className="metric-card">
                   <span className="metric-label">Focus Areas</span>
-                  <span className="metric-val" style={{ color: studentAnalytics.weaknesses.length > 0 ? '#ef4444' : '#10b981' }}>
+                  <span className="metric-val" style={{ color: studentAnalytics.weaknesses.length > 0 ? '#dc2626' : '#059669' }}>
                     {studentAnalytics.weaknesses.length}
                   </span>
                   <span className="metric-sub">Topics to reinforce</span>
@@ -1005,13 +1199,19 @@ function App() {
                   <h3 style={{ color: '#065f46', display: 'flex', alignItems: 'center', gap: '8px' }}>
                     🌟 My Demonstrated Strengths
                   </h3>
+                  <p className="data-card-subtitle">Topics where you have achieved proficient or advanced understanding.</p>
                   {studentAnalytics.strengths.length === 0 ? (
-                    <p style={{ color: '#64748b', fontSize: '14px' }}>Keep practicing to build topic masteries!</p>
+                    <p style={{ color: '#64748b', fontSize: '14px' }}>Keep practicing assessments to build topic masteries!</p>
                   ) : (
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
                       {studentAnalytics.strengths.map((t, i) => (
-                        <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 12px', background: '#ecfdf5', borderRadius: '8px' }}>
-                          <span><strong>{t.topic}</strong> <small style={{ color: '#059669' }}>({t.subject})</small></span>
+                        <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 14px', background: '#ecfdf5', borderRadius: '8px', border: '1px solid #a7f3d0' }}>
+                          <span>
+                            <strong>{t.topic}</strong>
+                            {t.subject && t.subject !== 'STEM' && t.subject !== 'General' && (
+                              <small style={{ color: '#059669', marginLeft: '6px' }}>({t.subject})</small>
+                            )}
+                          </span>
                           <span style={{ fontWeight: 'bold', color: '#059669' }}>{t.avgPct}%</span>
                         </div>
                       ))}
@@ -1024,23 +1224,27 @@ function App() {
                   <h3 style={{ color: '#b91c1c', display: 'flex', alignItems: 'center', gap: '8px' }}>
                     🎯 Focus & Reinforcement Areas
                   </h3>
+                  <p className="data-card-subtitle">Topics where extra study and practice will boost your overall mastery.</p>
                   {studentAnalytics.weaknesses.length === 0 ? (
                     <p style={{ color: '#059669', fontSize: '14px' }}>Great job! You have no critical weak topics.</p>
                   ) : (
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
                       {studentAnalytics.weaknesses.map((t, i) => (
-                        <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 12px', background: '#fef2f2', borderRadius: '8px', flexWrap: 'wrap', gap: '8px' }}>
+                        <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 14px', background: '#fef2f2', borderRadius: '8px', border: '1px solid #fecaca', flexWrap: 'wrap', gap: '8px' }}>
                           <div>
-                            <strong>{t.topic}</strong> <small style={{ color: '#dc2626' }}>({t.subject} — {t.avgPct}%)</small>
+                            <strong>{t.topic}</strong>
+                            <small style={{ color: '#dc2626', marginLeft: '6px' }}>
+                              ({t.subject && t.subject !== 'STEM' && t.subject !== 'General' ? `${t.subject} • ` : ''}{t.avgPct}%)
+                            </small>
                           </div>
                           <button
                             onClick={() => {
-                              setSelectedTopicForAIDT(t.topic)
+                              setSelectedTopicForStudy(t.topic)
                               handleGenerateMaterials(t.topic)
-                              setActiveTab('aidt_materials')
+                              setActiveTab('study_materials')
                             }}
                             className="btn-primary"
-                            style={{ padding: '4px 10px', fontSize: '12px' }}
+                            style={{ padding: '5px 12px', fontSize: '12px' }}
                           >
                             Study Unit →
                           </button>
@@ -1054,6 +1258,7 @@ function App() {
               {/* Subject Breakdown */}
               <div className="data-card">
                 <h3>Subject Competency Breakdown</h3>
+                <p className="data-card-subtitle">Your progress across all enrolled subjects.</p>
                 {studentAnalytics.subjectBreakdown.map((sb, idx) => (
                   <div key={idx} style={{ marginBottom: '16px' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px', fontSize: '14px' }}>
@@ -1065,7 +1270,7 @@ function App() {
                         style={{
                           height: '100%',
                           width: `${sb.avgPct}%`,
-                          background: sb.avgPct >= 70 ? '#10b981' : sb.avgPct >= 50 ? '#3b82f6' : '#ef4444'
+                          background: sb.avgPct >= 70 ? '#059669' : sb.avgPct >= 50 ? '#2563eb' : '#dc2626'
                         }}
                       ></div>
                     </div>
@@ -1074,104 +1279,110 @@ function App() {
               </div>
             </>
           ) : (
-            <p>No learning analytics available yet.</p>
+            <p style={{ color: '#64748b' }}>No learning analytics available yet.</p>
           )}
         </div>
       )}
 
       {/* ============================================================== */}
-      {/* STUDENT TAB 2: AI DIGITAL TEXTBOOK (PERSONALIZED MATERIALS)    */}
+      {/* STUDENT TAB 2: LEARN WITH AI MATERIALS                         */}
       {/* ============================================================== */}
-      {currentUser.role === 'student' && activeTab === 'aidt_materials' && (
+      {currentUser.role === 'student' && activeTab === 'study_materials' && (
         <div>
           <div className="data-card" style={{ marginBottom: '24px' }}>
-            <h3>📖 South Korea AIDT Personalized Learning Generator</h3>
-            <p style={{ fontSize: '13px', color: '#64748b', marginTop: '-6px' }}>
-              The AI Digital Textbook creates a tailored micro-learning module with intuitive concept breakdowns, step-by-step worked solutions, and self-checks.
+            <h3>📖 Learn with AI Materials</h3>
+            <p className="data-card-subtitle">
+              Generates a tailored micro-learning module with intuitive concept breakdowns, step-by-step worked solutions, and diagnostic self-checks for any topic.
             </p>
 
             <div style={{ display: 'flex', gap: '12px', alignItems: 'center', flexWrap: 'wrap', marginTop: '16px' }}>
               <input
-                value={selectedTopicForAIDT}
-                onChange={(e) => setSelectedTopicForAIDT(e.target.value)}
-                placeholder="Topic name (e.g. Stoichiometry, Osmosis, Quadratics)"
+                value={selectedTopicForStudy}
+                onChange={(e) => setSelectedTopicForStudy(e.target.value)}
+                placeholder="Enter topic name (e.g. Diffusion, Osmosis, Chemical Bonding)"
                 style={{ flex: 1, minWidth: '220px' }}
               />
               <button
-                onClick={() => handleGenerateMaterials(selectedTopicForAIDT)}
-                disabled={loadingAIDT}
+                onClick={() => handleGenerateMaterials(selectedTopicForStudy)}
+                disabled={loadingStudy}
                 className="btn-primary"
               >
-                {loadingAIDT ? 'Generating Learning Unit...' : '⚡ Generate My Study Guide'}
+                {loadingStudy ? 'Generating Learning Unit...' : '⚡ Generate Learning Material'}
               </button>
             </div>
           </div>
 
-          {loadingAIDT && (
+          {loadingStudy && (
             <div className="data-card" style={{ textAlign: 'center', padding: '40px' }}>
               <div style={{ fontSize: '32px', marginBottom: '12px' }}>🤖</div>
-              <h3 style={{ margin: '0 0 6px', color: '#1e3a8a' }}>Generating Differentiated Learning Content...</h3>
+              <h3 style={{ margin: '0 0 6px', color: '#1e40af' }}>Generating Tailored Learning Guide...</h3>
               <p style={{ color: '#64748b', fontSize: '14px', margin: 0 }}>
                 Synthesizing step-by-step worked examples, concept analogies, and self-checks.
               </p>
             </div>
           )}
 
-          {aidtMaterials && (
-            <div className="aidt-module">
-              <div className="aidt-module-header">
+          {studyMaterials && (
+            <div className="study-module">
+              <div className="study-module-header">
                 <span className="badge badge-progress" style={{ marginBottom: '8px' }}>
-                  {aidtMaterials.level || 'Adaptive Learning Unit'}
+                  {studyMaterials.level || 'Adaptive Study Unit'}
                 </span>
-                <h2 className="aidt-module-title">
-                  {aidtMaterials.topic} ({aidtMaterials.subject})
+                {/* Clean Topic Header — NO '(STEM)' appended */}
+                <h2 className="study-module-title">
+                  {studyMaterials.topic}
+                  {studyMaterials.subject && studyMaterials.subject !== 'STEM' && studyMaterials.subject !== 'General' && (
+                    <span style={{ fontSize: '15px', color: '#64748b', fontWeight: '500', marginLeft: '10px' }}>
+                      ({studyMaterials.subject})
+                    </span>
+                  )}
                 </h2>
-                {aidtMaterials.learningObjective && (
-                  <p style={{ color: '#0284c7', fontWeight: '600', margin: 0, fontSize: '14px' }}>
-                    🎯 Goal: {aidtMaterials.learningObjective}
+                {studyMaterials.learningObjective && (
+                  <p style={{ color: '#1e40af', fontWeight: '600', margin: 0, fontSize: '14px' }}>
+                    🎯 Goal: {studyMaterials.learningObjective}
                   </p>
                 )}
               </div>
 
               {/* Concept Breakdown */}
-              {aidtMaterials.conceptBreakdown && (
-                <div className="aidt-section">
+              {studyMaterials.conceptBreakdown && (
+                <div className="study-section">
                   <h4>💡 Core Concept & Everyday Analogy</h4>
                   <p style={{ margin: 0, lineHeight: 1.6, fontSize: '15px' }}>
-                    {aidtMaterials.conceptBreakdown}
+                    {studyMaterials.conceptBreakdown}
                   </p>
                 </div>
               )}
 
               {/* Step-by-Step Worked Example */}
-              {aidtMaterials.workedExample && (
-                <div className="aidt-section" style={{ borderLeftColor: '#10b981' }}>
+              {studyMaterials.workedExample && (
+                <div className="study-section" style={{ borderLeftColor: '#059669' }}>
                   <h4 style={{ color: '#047857' }}>✏️ Step-by-Step Worked Problem</h4>
-                  <div style={{ background: 'white', padding: '12px 16px', borderRadius: '8px', border: '1px solid #d1fae5', marginBottom: '12px', fontWeight: '600' }}>
-                    {aidtMaterials.workedExample.problem}
+                  <div style={{ background: 'white', padding: '14px 18px', borderRadius: '8px', border: '1px solid #d1fae5', marginBottom: '12px', fontWeight: '600' }}>
+                    {studyMaterials.workedExample.problem}
                   </div>
-                  {Array.isArray(aidtMaterials.workedExample.stepByStepSolution) && (
+                  {Array.isArray(studyMaterials.workedExample.stepByStepSolution) && (
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                      {aidtMaterials.workedExample.stepByStepSolution.map((step, idx) => (
+                      {studyMaterials.workedExample.stepByStepSolution.map((step, idx) => (
                         <div key={idx} className="step-card">
                           {step}
                         </div>
                       ))}
                     </div>
                   )}
-                  {aidtMaterials.workedExample.explanation && (
+                  {studyMaterials.workedExample.explanation && (
                     <p style={{ fontSize: '13px', color: '#065f46', marginTop: '10px', fontStyle: 'italic' }}>
-                      Takeaway: {aidtMaterials.workedExample.explanation}
+                      Takeaway: {studyMaterials.workedExample.explanation}
                     </p>
                   )}
                 </div>
               )}
 
               {/* Pro Tips */}
-              {Array.isArray(aidtMaterials.proTips) && aidtMaterials.proTips.length > 0 && (
-                <div className="aidt-section" style={{ borderLeftColor: '#f59e0b' }}>
+              {Array.isArray(studyMaterials.proTips) && studyMaterials.proTips.length > 0 && (
+                <div className="study-section" style={{ borderLeftColor: '#d97706' }}>
                   <h4 style={{ color: '#b45309' }}>⚡ Pro Tips & Common Pitfalls to Avoid</h4>
-                  {aidtMaterials.proTips.map((tip, idx) => (
+                  {studyMaterials.proTips.map((tip, idx) => (
                     <div key={idx} className="protip-item">
                       <span>⚠️</span>
                       <span>{tip}</span>
@@ -1181,23 +1392,23 @@ function App() {
               )}
 
               {/* Self Check Questions */}
-              {Array.isArray(aidtMaterials.selfCheckQuestions) && aidtMaterials.selfCheckQuestions.length > 0 && (
-                <div className="aidt-section" style={{ borderLeftColor: '#6366f1' }}>
+              {Array.isArray(studyMaterials.selfCheckQuestions) && studyMaterials.selfCheckQuestions.length > 0 && (
+                <div className="study-section" style={{ borderLeftColor: '#4f46e5' }}>
                   <h4 style={{ color: '#4338ca' }}>❓ Quick Diagnostic Self-Check</h4>
-                  {aidtMaterials.selfCheckQuestions.map((q, idx) => (
-                    <div key={idx} style={{ background: 'white', padding: '14px', borderRadius: '8px', border: '1px solid #e0e7ff', marginBottom: '10px' }}>
-                      <div style={{ fontWeight: '600', marginBottom: '8px' }}>
+                  {studyMaterials.selfCheckQuestions.map((q, idx) => (
+                    <div key={idx} style={{ background: 'white', padding: '16px', borderRadius: '8px', border: '1px solid #e0e7ff', marginBottom: '10px' }}>
+                      <div style={{ fontWeight: '600', marginBottom: '10px', fontSize: '15px' }}>
                         Q{idx + 1}: {q.question}
                       </div>
                       <button
                         onClick={() => setRevealedAnswers((prev) => ({ ...prev, [idx]: !prev[idx] }))}
                         className="btn-secondary"
-                        style={{ padding: '4px 10px', fontSize: '12px' }}
+                        style={{ padding: '6px 12px', fontSize: '12px' }}
                       >
                         {revealedAnswers[idx] ? 'Hide Answer' : 'Show Answer & Explanation'}
                       </button>
                       {revealedAnswers[idx] && (
-                        <div style={{ marginTop: '10px', padding: '10px', background: '#eef2ff', borderRadius: '6px', fontSize: '14px', color: '#3730a3' }}>
+                        <div style={{ marginTop: '12px', padding: '12px 14px', background: '#eef2ff', borderRadius: '6px', fontSize: '14px', color: '#3730a3', lineHeight: 1.5 }}>
                           <strong>Answer:</strong> {q.answer}
                         </div>
                       )}
@@ -1217,7 +1428,7 @@ function App() {
         <div>
           <div className="data-card" style={{ marginBottom: '24px' }}>
             <h3>🎯 Adaptive Diagnostic Evaluation Quiz</h3>
-            <p style={{ fontSize: '13px', color: '#64748b', marginTop: '-6px' }}>
+            <p className="data-card-subtitle">
               Practice with real-time AI questions. Get instant hints, automatic scoring, and detailed step-by-step explanations.
             </p>
 
@@ -1241,7 +1452,7 @@ function App() {
           {loadingQuiz && (
             <div className="data-card" style={{ textAlign: 'center', padding: '40px' }}>
               <div style={{ fontSize: '32px', marginBottom: '12px' }}>🎲</div>
-              <h3 style={{ margin: '0 0 6px', color: '#1e3a8a' }}>Crafting Adaptive Diagnostic Questions...</h3>
+              <h3 style={{ margin: '0 0 6px', color: '#1e40af' }}>Crafting Adaptive Diagnostic Questions...</h3>
               <p style={{ color: '#64748b', fontSize: '14px', margin: 0 }}>
                 Calibrating difficulty and generating explanations based on your curriculum.
               </p>
@@ -1250,9 +1461,15 @@ function App() {
 
           {quizData && Array.isArray(quizData.questions) && (
             <div className="quiz-container">
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', flexWrap: 'wrap', gap: '8px' }}>
-                <h3 style={{ margin: 0, color: '#1e3a8a' }}>
-                  Quiz: {quizData.topic} ({quizData.subject})
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '22px', flexWrap: 'wrap', gap: '8px' }}>
+                {/* Clean Quiz Title — NO '(STEM)' */}
+                <h3 style={{ margin: 0, color: '#1e40af' }}>
+                  Quiz: {quizData.topic}
+                  {quizData.subject && quizData.subject !== 'STEM' && quizData.subject !== 'General' && (
+                    <span style={{ fontSize: '14px', color: '#64748b', fontWeight: 'normal', marginLeft: '8px' }}>
+                      ({quizData.subject})
+                    </span>
+                  )}
                 </h3>
                 <span className="badge badge-progress">
                   {quizData.questions.length} Diagnostic Questions
@@ -1322,8 +1539,8 @@ function App() {
 
               {/* Quiz Summary */}
               {Object.keys(userQuizAnswers).length === quizData.questions.length && (
-                <div style={{ textAlign: 'center', padding: '20px', background: '#f0fdf4', borderRadius: '10px', border: '1px solid #bbf7d0' }}>
-                  <h3 style={{ margin: '0 0 8px', color: '#166534' }}>
+                <div style={{ textAlign: 'center', padding: '24px', background: '#f0fdf4', borderRadius: '12px', border: '1px solid #bbf7d0', marginTop: '20px' }}>
+                  <h3 style={{ margin: '0 0 8px', color: '#166534', fontSize: '18px' }}>
                     Quiz Complete! You scored{' '}
                     {Object.entries(userQuizAnswers).filter(([idx, ans]) => ans === quizData.questions[idx].correctIndex).length}{' '}
                     out of {quizData.questions.length}
@@ -1331,7 +1548,7 @@ function App() {
                   <button
                     onClick={() => handleGenerateQuiz(quizData.topic)}
                     className="btn-primary"
-                    style={{ marginTop: '8px' }}
+                    style={{ marginTop: '10px' }}
                   >
                     Try Another Set of Practice Questions 🔄
                   </button>
@@ -1348,6 +1565,9 @@ function App() {
       {currentUser.role === 'student' && activeTab === 'my_scores' && (
         <div className="data-card">
           <h3>My Assessment History</h3>
+          <p className="data-card-subtitle">
+            Complete record of your scores across exams, quizzes, assignments, and class participation.
+          </p>
           {!profile?.scores || profile.scores.length === 0 ? (
             <p style={{ color: '#64748b' }}>No assessment scores on record yet.</p>
           ) : (
@@ -1371,7 +1591,7 @@ function App() {
                       <td><strong>{s.topic}</strong></td>
                       <td>{s.score} / {s.max_score}</td>
                       <td>
-                        <span style={{ fontWeight: 'bold', color: pct >= 70 ? '#10b981' : pct >= 50 ? '#f59e0b' : '#ef4444' }}>
+                        <span style={{ fontWeight: 'bold', color: pct >= 70 ? '#059669' : pct >= 50 ? '#d97706' : '#dc2626' }}>
                           {pct}%
                         </span>
                       </td>

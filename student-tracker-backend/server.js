@@ -15,7 +15,7 @@ if (process.env.GROQ_API_KEY) {
   }
 }
 
-async function callGroqAI(prompt, systemMessage = 'You are an expert AI tutor in a South Korean AI Digital Textbook (AIDT) system.') {
+async function callGroqAI(prompt, systemMessage = 'You are an expert educational AI tutor and diagnostic specialist providing constructive, data-grounded assessment for secondary school students.') {
   if (!groq) throw new Error('GROQ_API_KEY is not configured on the server.');
   const models = ['llama-3.3-70b-versatile', 'llama-3.1-8b-instant', 'mixtral-8x7b-32768', 'openai/gpt-oss-20b'];
   let lastErr = null;
@@ -73,7 +73,7 @@ function requireDb(req, res, next) {
 // Health check endpoint
 app.get('/', (req, res) => {
   res.json({
-    message: 'EduSTEM AI Backend running with Firebase Firestore',
+    message: 'AI Student Tracker Backend running with Firebase Firestore',
     status: 'healthy',
     dbStatus: getInitStatus(),
   });
@@ -223,6 +223,42 @@ app.post('/api/login', requireDb, async (req, res) => {
     });
   } catch (err) {
     console.error('Login error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Reset / Forgot Password
+app.post('/api/reset-password', requireDb, async (req, res) => {
+  try {
+    const db = req.db;
+    const { email, newPassword } = req.body;
+
+    if (!email || !newPassword) {
+      return res.status(400).json({ error: 'Email and new password are required.' });
+    }
+
+    if (newPassword.length < 6) {
+      return res.status(400).json({ error: 'New password must be at least 6 characters long.' });
+    }
+
+    const normalizedEmail = email.toLowerCase().trim();
+    const query = await db.collection('users').where('email', '==', normalizedEmail).get();
+
+    if (query.empty) {
+      return res.status(404).json({ error: 'No account found with this email address.' });
+    }
+
+    const userDoc = query.docs[0];
+    const hashedPassword = bcrypt.hashSync(newPassword, 10);
+
+    await db.collection('users').doc(userDoc.id).update({
+      password: hashedPassword,
+      updatedAt: new Date().toISOString(),
+    });
+
+    res.json({ message: 'Password has been updated successfully. You can now log in.' });
+  } catch (err) {
+    console.error('Reset password error:', err);
     res.status(500).json({ error: err.message });
   }
 });
@@ -627,7 +663,7 @@ app.get('/api/students/:id/analytics', requireDb, async (req, res) => {
   }
 });
 
-// 3. South Korea AIDT Personalized Learning Materials Generator
+// 3. Learn with AI Materials Generator
 app.post('/api/students/:id/personalized-materials', requireDb, async (req, res) => {
   try {
     const db = req.db;
@@ -646,30 +682,29 @@ app.post('/api/students/:id/personalized-materials', requireDb, async (req, res)
 
     // Determine target topic
     let targetTopic = requestedTopic;
-    let targetSubject = req.body?.subject || 'STEM';
+    let targetSubject = req.body?.subject || '';
 
     if (!targetTopic && scores.length > 0) {
-      // Pick the lowest score topic
       const lowest = [...scores].sort((a, b) => (a.score / a.max_score) - (b.score / b.max_score))[0];
       if (lowest && lowest.topic) {
         targetTopic = lowest.topic;
-        targetSubject = lowest.subject || 'STEM';
+        targetSubject = lowest.subject || '';
       }
     }
 
-    if (!targetTopic) targetTopic = 'Fundamental Science & Problem Solving';
+    if (!targetTopic) targetTopic = 'Core Concept Review';
 
-    const prompt = `You are an AI Digital Textbook (AIDT) personalized content generator modeled after the South Korean Ministry of Education adaptive learning framework.
-Generate a structured, interactive, and personalized micro-learning unit for secondary school student "${student.name}".
-Subject: ${targetSubject}
-Target Weak Topic: "${targetTopic}"
+    const prompt = `You are an advanced educational AI tutor specializing in secondary school curriculum.
+Generate a structured, interactive, and personalized micro-learning unit for student "${student.name}".
+${targetSubject ? `Subject: ${targetSubject}` : ''}
+Target Topic: "${targetTopic}"
 Student's Recent Performance Context: ${JSON.stringify(scores.slice(-5))}
 
 Please produce the unit in clean JSON format with these exact keys:
 {
   "topic": "${targetTopic}",
   "subject": "${targetSubject}",
-  "level": "Adaptive Remedial / Reinforcement",
+  "level": "Adaptive Study Unit",
   "learningObjective": "1-sentence actionable goal",
   "conceptBreakdown": "Clear, intuitive explanation broken into 2-3 short core ideas. Use an everyday analogy.",
   "workedExample": {
@@ -701,7 +736,7 @@ Respond ONLY with valid JSON. Do not include markdown code block quotes.`;
 
     const aiResponse = await callGroqAI(
       prompt,
-      'You are a high-level educational AI engine creating South Korea AIDT (AI Digital Textbook) micro-learning resources. Output strict JSON only.'
+      'You are a high-level educational AI engine creating structured micro-learning resources. Output strict JSON only.'
     );
 
     let parsed = null;
@@ -724,7 +759,7 @@ Respond ONLY with valid JSON. Do not include markdown code block quotes.`;
   }
 });
 
-// 4. AIDT Interactive Adaptive Practice Quiz Generator
+// 4. Interactive Adaptive Practice Quiz Generator
 app.post('/api/students/:id/practice-quiz', requireDb, async (req, res) => {
   try {
     const db = req.db;
@@ -741,19 +776,18 @@ app.post('/api/students/:id/practice-quiz', requireDb, async (req, res) => {
     const scores = scoresSnapshot.docs.map((d) => d.data());
 
     let targetTopic = requestedTopic;
-    let targetSubject = req.body?.subject || 'STEM';
+    let targetSubject = req.body?.subject || '';
 
     if (!targetTopic && scores.length > 0) {
       const lowest = [...scores].sort((a, b) => (a.score / a.max_score) - (b.score / b.max_score))[0];
       if (lowest && lowest.topic) {
         targetTopic = lowest.topic;
-        targetSubject = lowest.subject || 'STEM';
+        targetSubject = lowest.subject || '';
       }
     }
-    if (!targetTopic) targetTopic = 'General STEM Concepts';
+    if (!targetTopic) targetTopic = 'Fundamental Concepts';
 
-    const prompt = `Create a 3-question adaptive diagnostic quiz for high school topic "${targetTopic}" (${targetSubject}).
-Model this on South Korean AI Digital Textbook adaptive diagnostic evaluation.
+    const prompt = `Create a 3-question adaptive diagnostic quiz for high school topic "${targetTopic}"${targetSubject ? ` (${targetSubject})` : ''}.
 Respond strictly in JSON format with this structure:
 {
   "topic": "${targetTopic}",
@@ -774,7 +808,7 @@ Provide exactly 3 questions ranging from foundational to moderate difficulty. Ou
 
     const aiResponse = await callGroqAI(
       prompt,
-      'You are a diagnostic test designer for an AI Digital Textbook. Output pure JSON only.'
+      'You are an expert diagnostic test designer for secondary school assessment. Output pure JSON only.'
     );
 
     let parsed = null;
