@@ -266,9 +266,6 @@ app.post('/api/login', requireDb, async (req, res) => {
           subject: activeSubject,
           updatedAt: new Date().toISOString(),
         });
-      } else if (!activeSubject) {
-        if (user.id === 'vXbo2eCYo1LepXt7bUNa') activeSubject = 'Chemistry';
-        else if (user.id === 'QuF7Hq7aC0euzP2DEKaW') activeSubject = 'Physics';
       }
     }
 
@@ -397,27 +394,7 @@ app.get('/api/students', requireDb, async (req, res) => {
     }));
 
     if (teacher_id) {
-      // Auto-heal duplicate Justinah Adedeji if teacher_id is QuF7Hq7aC0euzP2DEKaW (Mrs Suzana)
-      const mainJustinah = students.find((s) => s.id === '7iFLaTkdmfZ7R3YG6b4P');
-      if (mainJustinah && String(teacher_id) === 'QuF7Hq7aC0euzP2DEKaW') {
-        const teachers = Array.isArray(mainJustinah.teacher_ids)
-          ? mainJustinah.teacher_ids.map(String)
-          : [String(mainJustinah.teacher_id)].filter(Boolean);
-        if (!teachers.includes('QuF7Hq7aC0euzP2DEKaW')) {
-          teachers.push('QuF7Hq7aC0euzP2DEKaW');
-          await db.collection('students').doc('7iFLaTkdmfZ7R3YG6b4P').update({ teacher_ids: teachers });
-          mainJustinah.teacher_ids = teachers;
-        }
-        try {
-          const dupDoc = await db.collection('students').doc('S5g0naTBe4LZ6RqCC7zR').get();
-          if (dupDoc.exists) {
-            await db.collection('students').doc('S5g0naTBe4LZ6RqCC7zR').delete();
-          }
-        } catch (_) {}
-      }
-
       students = students.filter((s) => {
-        if (s.id === 'S5g0naTBe4LZ6RqCC7zR') return false; // ignore empty duplicate
         if (s.teacher_id === String(teacher_id)) return true;
         if (Array.isArray(s.teacher_ids) && s.teacher_ids.map(String).includes(String(teacher_id))) return true;
         return false;
@@ -634,13 +611,6 @@ app.get('/api/students/:id/profile', requireDb, async (req, res) => {
         if (myScore) teacherSubject = myScore.subject;
       }
 
-      if (String(teacher_id) === 'vXbo2eCYo1LepXt7bUNa' && !teacherSubject) {
-        teacherSubject = 'Chemistry';
-      }
-      if (String(teacher_id) === 'QuF7Hq7aC0euzP2DEKaW' && !teacherSubject) {
-        teacherSubject = 'Physics';
-      }
-
       scores = scores.filter((s) => {
         // Explicitly recorded by this teacher
         if (s.teacher_id && String(s.teacher_id) === String(teacher_id)) {
@@ -790,12 +760,6 @@ app.get('/api/teachers/:teacherId/analytics', requireDb, async (req, res) => {
     const teacherDoc = await db.collection('users').doc(String(teacherId)).get();
     const teacherData = teacherDoc.exists ? teacherDoc.data() : {};
     let teacherSubject = teacherData.subject || '';
-    if (String(teacherId) === 'vXbo2eCYo1LepXt7bUNa' && !teacherSubject) {
-      teacherSubject = 'Chemistry';
-    }
-    if (String(teacherId) === 'QuF7Hq7aC0euzP2DEKaW' && !teacherSubject) {
-      teacherSubject = 'Physics';
-    }
 
     const studentIds = students.map((s) => s.id);
     const allScoresSnapshot = await db.collection('scores').get();
@@ -1240,6 +1204,51 @@ Provide exactly 3 questions ranging from foundational to moderate difficulty. Ou
     res.json({ quiz: parsed });
   } catch (err) {
     console.error('Quiz generation error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Admin / Maintenance: Clear all records for fresh launch
+app.post('/api/admin/clear-all-records', requireDb, async (req, res) => {
+  try {
+    const db = req.db;
+    const { secretKey } = req.body || {};
+
+    if (secretKey !== 'reset-ai-student-tracker-2026') {
+      return res.status(403).json({ error: 'Unauthorized: Invalid secret key.' });
+    }
+
+    const collections = ['users', 'students', 'scores'];
+    const results = {};
+
+    for (const collName of collections) {
+      const snap = await db.collection(collName).get();
+      let count = 0;
+      const batchSize = 400;
+      let batch = db.batch();
+
+      for (let i = 0; i < snap.docs.length; i++) {
+        batch.delete(snap.docs[i].ref);
+        count++;
+        if (count % batchSize === 0) {
+          await batch.commit();
+          batch = db.batch();
+        }
+      }
+      if (count > 0 && count % batchSize !== 0) {
+        await batch.commit();
+      }
+      results[collName] = count;
+    }
+
+    res.json({
+      success: true,
+      message: 'All records (users, students, scores) have been permanently cleared from Firestore.',
+      deletedCounts: results,
+      timestamp: new Date().toISOString(),
+    });
+  } catch (err) {
+    console.error('Clear all records error:', err);
     res.status(500).json({ error: err.message });
   }
 });
