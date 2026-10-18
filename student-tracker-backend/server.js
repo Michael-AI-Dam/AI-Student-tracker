@@ -625,6 +625,21 @@ app.get('/api/students/:id/profile', requireDb, async (req, res) => {
       });
     }
 
+    // Standard consistent arrangement for assessment types across all students
+    const assessmentOrder = {
+      assignment: 1,
+      quiz: 2,
+      test: 3,
+      participation: 4,
+      exam: 5,
+    };
+    scores.sort((a, b) => {
+      const oA = assessmentOrder[(a.type || '').toLowerCase()] || 99;
+      const oB = assessmentOrder[(b.type || '').toLowerCase()] || 99;
+      if (oA !== oB) return oA - oB;
+      return new Date(a.createdAt || 0) - new Date(b.createdAt || 0);
+    });
+
     res.json({ student, scores });
   } catch (err) {
     console.error('Get profile error:', err);
@@ -1011,14 +1026,29 @@ app.get('/api/students/:id/analytics', requireDb, async (req, res) => {
       subjectMap[sub].assessmentTypes[typeKey].count++;
     });
 
+    const assessmentOrder = {
+      assignment: 1,
+      quiz: 2,
+      test: 3,
+      participation: 4,
+      exam: 5,
+    };
+
     const subjectBreakdown = Object.values(subjectMap).map((sm) => {
       const avgPct = sm.totalMax > 0 ? Number(((sm.totalScore / sm.totalMax) * 100).toFixed(1)) : 0;
-      const typeSummaryList = Object.values(sm.assessmentTypes).map((tp) => ({
-        type: tp.type,
-        typeKey: tp.typeKey,
-        avgPct: tp.totalMax > 0 ? Number(((tp.totalScore / tp.totalMax) * 100).toFixed(1)) : 0,
-        count: tp.count,
-      }));
+      sm.assessments.sort((a, b) => {
+        const oA = assessmentOrder[(a.typeKey || '').toLowerCase()] || 99;
+        const oB = assessmentOrder[(b.typeKey || '').toLowerCase()] || 99;
+        return oA - oB;
+      });
+      const typeSummaryList = Object.values(sm.assessmentTypes)
+        .sort((a, b) => (assessmentOrder[a.typeKey] || 99) - (assessmentOrder[b.typeKey] || 99))
+        .map((tp) => ({
+          type: tp.type,
+          typeKey: tp.typeKey,
+          avgPct: tp.totalMax > 0 ? Number(((tp.totalScore / tp.totalMax) * 100).toFixed(1)) : 0,
+          count: tp.count,
+        }));
       return {
         subject: sm.subject,
         avgPct,

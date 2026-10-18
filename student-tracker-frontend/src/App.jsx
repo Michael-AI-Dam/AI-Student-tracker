@@ -86,11 +86,35 @@ function App() {
     return className ? `${name} (${className})` : name
   }
 
+  // Helper: Standard consistent arrangement for assessment types across all students
+  const sortScoresByAssessmentType = (scoresList) => {
+    if (!Array.isArray(scoresList)) return []
+    const orderMap = {
+      assignment: 1,
+      quiz: 2,
+      test: 3,
+      participation: 4,
+      exam: 5,
+    }
+    return [...scoresList].sort((a, b) => {
+      const typeA = (a.typeKey || a.type || '').toString().toLowerCase()
+      const typeB = (b.typeKey || b.type || '').toString().toLowerCase()
+      const orderA = orderMap[typeA] || 99
+      const orderB = orderMap[typeB] || 99
+      if (orderA !== orderB) return orderA - orderB
+      const timeA = new Date(a.createdAt || 0).getTime()
+      const timeB = new Date(b.createdAt || 0).getTime()
+      return timeA - timeB
+    })
+  }
+
   // Helper: Get subject assessments formatted with assessment type and exact percentage from history
   const getSubjectAssessments = (sub) => {
-    if (sub.assessments && sub.assessments.length > 0) return sub.assessments
-    if (profile?.scores) {
-      return profile.scores
+    let list = []
+    if (sub.assessments && sub.assessments.length > 0) {
+      list = sub.assessments
+    } else if (profile?.scores) {
+      list = profile.scores
         .filter((s) => (s.subject || '').toLowerCase() === (sub.subject || '').toLowerCase())
         .map((s) => {
           const typeKey = (s.type || 'assignment').toLowerCase()
@@ -112,10 +136,11 @@ function App() {
             score: s.score,
             max_score: s.max_score,
             avgPct,
+            createdAt: s.createdAt,
           }
         })
     }
-    return []
+    return sortScoresByAssessmentType(list)
   }
 
   // Helper: Sorting subjects so English is ALWAYS #1, Mathematics is ALWAYS #2, then others
@@ -1466,7 +1491,7 @@ function App() {
                     </tr>
                   </thead>
                   <tbody>
-                    {profile.scores.map((s) => {
+                    {sortScoresByAssessmentType(profile.scores).map((s) => {
                       const pct = s.max_score > 0 ? Number(((s.score / s.max_score) * 100).toFixed(1)) : 0
                       return (
                         <tr key={s.id}>
@@ -2042,7 +2067,7 @@ function App() {
                     </tr>
                   </thead>
                   <tbody>
-                    {filteredHistoryScores.map((s) => {
+                    {sortScoresByAssessmentType(filteredHistoryScores).map((s) => {
                       const pct = s.max_score > 0 ? Number(((s.score / s.max_score) * 100).toFixed(1)) : 0
                       return (
                         <tr key={s.id}>
