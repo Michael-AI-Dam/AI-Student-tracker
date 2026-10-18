@@ -64,6 +64,10 @@ function normalizeSubject(sub) {
   if (s === 'math' || s === 'maths' || s === 'mathematics') return 'mathematics';
   if (s === 'bio' || s === 'biology') return 'biology';
   if (s === 'eng' || s === 'english' || s === 'english language') return 'english';
+  if (s === 'animal husbandry' || s === 'animal husbandary') return 'animal husbandry';
+  if (s === 'computer science' || s === 'computer' || s === 'comp sci') return 'computer science';
+  if (s === 'agric' || s === 'agric sci' || s === 'agricultural science' || s === 'agriculture') return 'agricultural science';
+  if (s === 'hist' || s === 'history') return 'history';
   return s;
 }
 

@@ -3,6 +3,22 @@ import './App.css'
 
 const API_URL = (import.meta.env.VITE_API_URL || 'https://ai-student-tracker-stem.vercel.app').replace(/\/$/, '')
 
+const AVAILABLE_SUBJECTS = [
+  'Physics',
+  'Chemistry',
+  'Mathematics',
+  'Biology',
+  'English',
+  'Economics',
+  'Geography',
+  'Agricultural Science',
+  'Civic Education',
+  'Computer Science',
+  'Animal Husbandry',
+  'Animal Husbandary',
+  'History',
+]
+
 function App() {
   // Auth state
   const [currentUser, setCurrentUser] = useState(null)
@@ -12,9 +28,7 @@ function App() {
   const [authPassword, setAuthPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
   const [authRole, setAuthRole] = useState('teacher')
-  const [authSubject, setAuthSubject] = useState('Chemistry')
-  const [loginRole, setLoginRole] = useState('teacher')
-  const [loginSubject, setLoginSubject] = useState('Chemistry')
+  const [authSubject, setAuthSubject] = useState('Physics')
   const [accessCode, setAccessCode] = useState('')
   const [authError, setAuthError] = useState('')
   const [authSuccess, setAuthSuccess] = useState('')
@@ -328,8 +342,6 @@ function App() {
       body: JSON.stringify({
         email: authEmail,
         password: authPassword,
-        role: loginRole,
-        subject: loginRole === 'teacher' ? loginSubject : null,
       }),
     })
       .then(async (res) => {
@@ -337,7 +349,7 @@ function App() {
         if (!res.ok) throw new Error(data.error || 'Login failed')
         const activeUser = {
           ...data,
-          subject: (loginRole === 'teacher' ? (loginSubject || data.subject) : data.subject) || '',
+          subject: data.subject || '',
         }
         setCurrentUser(activeUser)
         if (activeUser.subject) {
@@ -368,8 +380,16 @@ function App() {
       .then(async (res) => {
         const data = await res.json()
         if (!res.ok) throw new Error(data.error || 'Signup failed')
-        setCurrentUser(data)
-        setActiveTab(data.role === 'teacher' ? 'analytics' : 'student_dashboard')
+        const activeUser = {
+          ...data,
+          subject: data.subject || '',
+        }
+        setCurrentUser(activeUser)
+        if (activeUser.subject) {
+          setSubject(activeUser.subject)
+          setEditTeacherSubject(activeUser.subject)
+        }
+        setActiveTab(activeUser.role === 'teacher' ? 'analytics' : 'student_dashboard')
       })
       .catch((err) => setAuthError(err.message))
   }
@@ -648,31 +668,6 @@ function App() {
                 />
               </label>
 
-              <label>
-                I am signing in as:
-                <select value={loginRole} onChange={(e) => setLoginRole(e.target.value)}>
-                  <option value="teacher">Teacher (Classroom Analytics Cockpit)</option>
-                  <option value="student">Student (Personal Learning Portal)</option>
-                </select>
-              </label>
-
-              {loginRole === 'teacher' && (
-                <label>
-                  Subject Taught (Subject you are taking):
-                  <select value={loginSubject} onChange={(e) => setLoginSubject(e.target.value)}>
-                    <option value="Chemistry">Chemistry</option>
-                    <option value="Physics">Physics</option>
-                    <option value="Mathematics">Mathematics</option>
-                    <option value="Biology">Biology</option>
-                    <option value="English">English</option>
-                    <option value="Economics">Economics</option>
-                    <option value="Geography">Geography</option>
-                    <option value="Agricultural Science">Agricultural Science</option>
-                    <option value="Civic Education">Civic Education</option>
-                  </select>
-                </label>
-              )}
-
               <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
                 <button
                   type="button"
@@ -732,15 +727,9 @@ function App() {
                 <label>
                   Subject Taught:
                   <select value={authSubject} onChange={(e) => setAuthSubject(e.target.value)}>
-                    <option value="Physics">Physics</option>
-                    <option value="Chemistry">Chemistry</option>
-                    <option value="Mathematics">Mathematics</option>
-                    <option value="Biology">Biology</option>
-                    <option value="English">English</option>
-                    <option value="Economics">Economics</option>
-                    <option value="Geography">Geography</option>
-                    <option value="Agricultural Science">Agricultural Science</option>
-                    <option value="Civic Education">Civic Education</option>
+                    {AVAILABLE_SUBJECTS.map((sub) => (
+                      <option key={sub} value={sub}>{sub}</option>
+                    ))}
                   </select>
                 </label>
               )}
@@ -2032,7 +2021,7 @@ function App() {
                         }}
                         className={`subject-tab-btn ${activeHistorySubject === sub ? 'active' : ''}`}
                       >
-                        {sub === 'Chemistry' ? '🧪 Chemistry' : sub === 'Physic' || sub === 'Physics' ? '⚛️ Physics' : sub === 'Mathematics' ? '📐 Mathematics' : sub === 'Biology' ? '🧬 Biology' : sub === 'English' ? '📖 English' : sub} ({count})
+                        {sub === 'Chemistry' ? '🧪 Chemistry' : (sub === 'Physic' || sub === 'Physics') ? '⚛️ Physics' : (sub === 'Mathematics' || sub === 'Maths') ? '📐 Mathematics' : (sub === 'Biology' || sub === 'Bio') ? '🧬 Biology' : (sub === 'English' || sub === 'English Language') ? '📖 English' : sub === 'Economics' ? '📊 Economics' : sub === 'Geography' ? '🌍 Geography' : (sub === 'Agricultural Science' || sub === 'Agric') ? '🌱 Agricultural Science' : sub === 'Civic Education' ? '⚖️ Civic Education' : (sub === 'Computer Science' || sub === 'Computer') ? '💻 Computer Science' : (sub === 'Animal Husbandry' || sub === 'Animal Husbandary') ? '🐄 Animal Husbandry' : sub === 'History' ? '🏛️ History' : sub} ({count})
                       </button>
                     )
                   })}
@@ -2368,15 +2357,9 @@ function App() {
                   onChange={(e) => setEditTeacherSubject(e.target.value)}
                   style={{ width: '100%' }}
                 >
-                  <option value="Physics">Physics</option>
-                  <option value="Chemistry">Chemistry</option>
-                  <option value="Mathematics">Mathematics</option>
-                  <option value="Biology">Biology</option>
-                  <option value="English">English</option>
-                  <option value="Economics">Economics</option>
-                  <option value="Geography">Geography</option>
-                  <option value="Agricultural Science">Agricultural Science</option>
-                  <option value="Civic Education">Civic Education</option>
+                  {AVAILABLE_SUBJECTS.map((sub) => (
+                    <option key={sub} value={sub}>{sub}</option>
+                  ))}
                 </select>
               </label>
 

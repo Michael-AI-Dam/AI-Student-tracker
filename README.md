@@ -26,7 +26,7 @@ Rather than generic positive reinforcement, the system pairs these metrics with 
 ## 🌟 Key Features & Capabilities
 
 ### 👨‍🏫 Teacher Analytics Cockpit
-- **Role-Based Subject Isolation:** Teachers select their subject upon login (e.g. Chemistry, Physics, Mathematics, Biology). A teacher's dashboard strictly isolates their classroom domain—preventing subject collision between educators.
+- **Role-Based Subject Isolation:** Teachers specify their subject when creating their account or updating profile settings (e.g., Physics, Chemistry, Mathematics, Computer Science, Animal Husbandry, Agricultural Science, History). Logins are streamlined to email and password only, and a teacher's dashboard strictly isolates their classroom domain—preventing subject collision between educators.
 - **Class-Wide Assessment Performance Matrix:** Tracks submission counts, class average percentages, and progress badges (`Mastered`, `In Progress`, `Needs Review`) across all 5 assessment types (`Assignment`, `Quiz`, `Test`, `Participation`, `Exam`).
 - **Interactive High-Level Metrics:** Clickable summary cards for **Class Size**, **Class Average**, **Total Assessments**, and **Early Intervention Alerts** with detailed drill-down modal views.
 - **Permanent Access Code & Cross-Teacher Linking:**
