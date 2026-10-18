@@ -1,22 +1,16 @@
 # 🎓 AI Student Tracker
 
-> **A multi-teacher, multi-dimensional academic performance tracker & AI-powered diagnostic remediation platform for secondary school students and educators.**
+> **A multi-teacher, multi-dimensional academic performance tracking & AI-powered diagnostic remediation platform for secondary school students and educators.**
 
-[![Frontend](https://img.shields.io/badge/Frontend-Vercel-black?logo=vercel)](https://ai-student-tracker-nine.vercel.app)
-[![Backend](https://img.shields.io/badge/Backend-Vercel%20Serverless-000000?logo=vercel)](https://ai-student-tracker-stem.vercel.app)
-[![Database](https://img.shields.io/badge/Database-Google%20Cloud%20Firestore-orange?logo=firebase)](https://firebase.google.com/)
-[![AI Engine](https://img.shields.io/badge/AI%20Engine-Groq%20Cloud%20(Llama--3)-f55036)](https://groq.com/)
-[![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-
-* **Live Web App:** [https://ai-student-tracker-nine.vercel.app](https://ai-student-tracker-nine.vercel.app)
-* **Production API:** [https://ai-student-tracker-stem.vercel.app](https://ai-student-tracker-stem.vercel.app)
+* **Project Link (Domain):** [https://ai-student-tracker-nine.vercel.app](https://ai-student-tracker-nine.vercel.app)
+* **Provider:** Vercel
 * **GitHub Repository:** [https://github.com/Michael-AI-Dam/AI-Student-tracker](https://github.com/Michael-AI-Dam/AI-Student-tracker)
 
 ---
 
 ## 📖 The Core Problem & Philosophy
 
-In conventional secondary education, a student's academic standing is often dictated by a single terminal examination. A student who actively participates in class, consistently completes laboratory assignments, and shows steady improvement across weekly quizzes can easily fail an entire term due to a single bad exam day or test anxiety.
+In secondary school, terminal examinations carry disproportionate weight. A student who actively participates in class, consistently completes laboratory assignments, and shows steady improvement across weekly quizzes can easily fail an entire term due to a single bad exam day or test anxiety.
 
 **AI Student Tracker replaces single-exam bias with Multi-Dimensional Weighted Composite Mastery.** It records evaluations across five distinct pedagogical dimensions:
 1. **Exams (40% Weight)** — Summative mastery assessments.
@@ -56,152 +50,15 @@ Rather than generic positive reinforcement, the system pairs these metrics with 
 
 ---
 
-## 🛠️ System Architecture & Tech Stack
+## 🛠️ System Architecture & Technology Stack
 
-```mermaid
-graph TD
-    Client["React 19 + Vite Frontend\n(Vercel: ai-student-tracker-nine)"]
-    API["Express.js Serverless API\n(Vercel: ai-student-tracker-stem)"]
-    DB[("Google Cloud Firestore\nNoSQL Database")]
-    AI["Groq Cloud AI API\n(Llama-3-70b / 8b)"]
-
-    Client -->|HTTPS / REST API| API
-    API -->|Google Cloud SDK| DB
-    API -->|Inference Requests| AI
-```
-
-| Layer | Technology | Hosting / Infrastructure |
+| Layer | Technology | Provider |
 |---|---|---|
-| **Frontend** | React 19, Vite 8, Modern CSS Variables | [Vercel](https://ai-student-tracker-nine.vercel.app) |
-| **Backend API** | Node.js, Express 4, CORS, dotenv | [Vercel Serverless Functions](https://ai-student-tracker-stem.vercel.app) |
-| **Database** | Google Cloud Firestore (NoSQL) | Google Cloud Platform (GCP) |
-| **AI Diagnostic Engine** | Groq Cloud SDK (`llama-3.3-70b-versatile`) | Groq Ultra-Low Latency Inference |
+| **Frontend** | React 19, Vite 8, Modern CSS Variables | Vercel |
+| **Backend API** | Node.js, Express 4, Serverless Functions | Vercel |
+| **Database** | Google Cloud Firestore (Managed NoSQL) | Google Cloud Platform (GCP) |
+| **AI Diagnostic Engine** | Groq Cloud SDK (`llama-3.3-70b-versatile`) | Groq Cloud (LPU Acceleration) |
 | **Security & Auth** | bcryptjs password hashing, Access Code validation | Stateless role-based verification |
-
----
-
-## 📊 Database Architecture (Firestore)
-
-The system is powered by three core Firestore collections:
-
-### 1. `users`
-Stores registered educator and student authentication records.
-```json
-{
-  "id": "vXbo2eCYo1LepXt7bUNa",
-  "name": "Mr Desmond",
-  "email": "desmond@school.edu",
-  "password": "<bcrypt_hash>",
-  "role": "teacher",
-  "subject": "Chemistry",
-  "student_id": null,
-  "createdAt": "2026-10-17T12:00:00.000Z"
-}
-```
-
-### 2. `students`
-Stores permanent student records across classrooms.
-```json
-{
-  "id": "7iFLaTkdmfZ7R3YG6b4P",
-  "name": "Justinah Adedeji",
-  "class_name": "SSS 2",
-  "teacher_id": "vXbo2eCYo1LepXt7bUNa",
-  "teacher_ids": ["vXbo2eCYo1LepXt7bUNa", "QuF7Hq7aC0euzP2DEKaW"],
-  "access_code": "9QF9AR",
-  "createdAt": "2026-10-17T14:20:21.613Z"
-}
-```
-
-### 3. `scores`
-Stores individual multi-dimensional assessment records.
-```json
-{
-  "id": "mZLaiyC0O1YODP010L7o",
-  "student_id": "7iFLaTkdmfZ7R3YG6b4P",
-  "teacher_id": "vXbo2eCYo1LepXt7bUNa",
-  "subject": "Chemistry",
-  "type": "exam",
-  "score": 58,
-  "max_score": 60,
-  "topic": "Exam",
-  "createdAt": "2026-10-17T16:07:21.521Z"
-}
-```
-
----
-
-## 🔌 API Reference
-
-### Authentication & Profiles
-* `POST /api/signup` — Register a new teacher or student account. (Requires valid `access_code` for students).
-* `POST /api/login` — Authenticate user. For teachers, updates active `subject`. Returns user payload.
-* `POST /api/forgot-password` — Verify email and reset account password.
-* `PUT /api/teachers/:teacherId/profile` — Update teacher profile info, subject, and/or password.
-
-### Teachers & Classroom Cockpit
-* `GET /api/teachers/:teacherId/students` — Fetch students assigned to this teacher.
-* `POST /api/students` — Register a new student or link an existing student across secondary equivalents (`SSS 1` $\equiv$ `Grade 10`). Re-uses permanent `access_code`.
-* `POST /api/teachers/remove-student` — Remove a student from a teacher's classroom roster.
-* `GET /api/teachers/:teacherId/analytics` — Class analytics: average, distribution, at-risk alerts, and `assessmentTypePerformance` matrix.
-* `POST /api/scores` — Record a score entry for a student under the teacher's subject.
-* `GET /api/students/:id/profile` — Retrieve student details and assessment scores filtered to the teacher's subject.
-
-### Students & Learning Engines
-* `GET /api/students/:id/analytics` — Comprehensive personal analytics: weighted composite score, completed assessments, and subject strengths/weaknesses grouped by assessment type.
-* `POST /api/students/:id/recommendations` — Groq AI diagnostic evaluation generated strictly from recorded scores in the requested subject.
-* `POST /api/students/:id/personalized-materials` — Synthesizes structured learning units with concept analogies, worked examples, and self-checks.
-* `POST /api/students/:id/practice-quiz` — Generates a 3-question adaptive multiple-choice quiz with explanations and hints.
-
----
-
-## ⚡ Running Locally
-
-### Prerequisites
-* **Node.js:** v18.0.0 or higher
-* **npm:** v9.0.0 or higher
-* **Groq API Key:** [Get an API key from Groq Console](https://console.groq.com/)
-* **Firebase Service Account:** GCP Firestore credentials
-
-### 1. Clone Repository
-```bash
-git clone https://github.com/Michael-AI-Dam/AI-Student-tracker.git
-cd AI-Student-tracker
-```
-
-### 2. Backend Setup
-```bash
-cd student-tracker-backend
-npm install
-```
-Create a `.env` file in `student-tracker-backend/`:
-```env
-PORT=5000
-GROQ_API_KEY=your_groq_api_key_here
-# Optional: Firebase config / GCP credentials
-FIREBASE_PROJECT_ID=your_project_id
-```
-Start the backend development server:
-```bash
-npm run dev
-# Server running at http://localhost:5000
-```
-
-### 3. Frontend Setup
-In a new terminal:
-```bash
-cd student-tracker-frontend
-npm install
-```
-Create a `.env` file in `student-tracker-frontend/`:
-```env
-VITE_API_URL=http://localhost:5000
-```
-Start the frontend development server:
-```bash
-npm run dev
-# Frontend running at http://localhost:5173
-```
 
 ---
 
@@ -241,9 +98,17 @@ npm run dev
 
 ---
 
-## 👨‍💻 Author & Contributions
+## 👨‍💻 Author, Attribution & Vision
 
-* **Author:** Michael Oluwadamilare ([@Michael-AI-Dam](https://github.com/Michael-AI-Dam))
-* **Repository:** [https://github.com/Michael-AI-Dam/AI-Student-tracker](https://github.com/Michael-AI-Dam/AI-Student-tracker)
+* **Author:** **Asaolu Michael O.**
+* **LinkedIn:** [https://linkedin.com/in/mikesungaiconvergence](https://linkedin.com/in/mikesungaiconvergence)
+* **GitHub:** [@Michael-AI-Dam](https://github.com/Michael-AI-Dam)
 
-Contributions, feature suggestions, and educational institution feedback are warmly welcome! Feel free to open an issue or submit a pull request.
+### Development Story & Coming Clean
+This platform represents a journey of human vision augmented by artificial intelligence:
+- **Version 1.0** was initially conceptualized, prototyped, and built with **Claude AI assist**.
+- **Version 2.0** underwent a comprehensive architectural upgrade, multi-teacher isolation engineering, permanent code harmonization across Nigerian/British grade equivalencies, and complete serverless cloud deployment with **Google Antigravity Assist**.
+- **Core Vision & Oversight:** Asaolu Michael O. conceived the vision, designed the pedagogical data models, defined the multi-dimensional composite formula, directed feature implementations, performed extensive debugging, and continuously tested and validated user workflows.
+
+### Open for Review & Collaboration
+> *"I am actively ready to make modifications, refine features, and evolve this platform based on your reviews, institutional feedback, and suggestions. Together, let us empower the minds and educators committed to nurturing young talents to greatness."*
